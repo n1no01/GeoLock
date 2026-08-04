@@ -5,13 +5,11 @@ import { toggleRecording, getCurrentAudio, resetAudioState } from './audio.js';
 import { exportGeoJSON, exportCSV } from './export.js';
 import { signUpUser, signInUser, signOutUser, getCurrentUser, onAuthStateChange } from './supabase.js';
 import { syncLocationsWithCloud } from './sync.js';
-import { setSecretKey, getSecretKey } from './crypto.js';
 import { registerBiometrics, authenticateWithBiometrics, isBiometricsAvailable } from './biometrics.js';
 
 let currentEditingImages = [];
 let isSignUpMode = false;
 
-// Inicijalizacija pri učitavanju stranice
 document.addEventListener('DOMContentLoaded', async () => {
   initMap((lat, lng) => {
     document.getElementById('lat').value = lat.toFixed(6);
@@ -22,10 +20,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateCounts();
   registerServiceWorker();
 
-  // 1. Provjera postojeće sačuvane sesije pri učitavanju (Zapamti me)
   await checkAuthStatus();
 
-  // 2. Osluškivač promjene stanja autentifikacije (automatska prijava/odjava/osvježavanje tokena)
   if (typeof onAuthStateChange === 'function') {
     onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
@@ -38,11 +34,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function setupEventListeners() {
-  // Tabovi
   document.getElementById('tabMapBtn').addEventListener('click', () => switchTab('map-view'));
   document.getElementById('tabListBtn').addEventListener('click', () => switchTab('list-view'));
 
-  // GPS i Snimanje
   const gpsBtn = document.getElementById('gpsBtn');
   if (gpsBtn) {
     gpsBtn.addEventListener('click', async () => {
@@ -52,7 +46,6 @@ function setupEventListeners() {
   }
   document.getElementById('recordBtn').addEventListener('click', toggleRecording);
 
-  // Osluškivanje ručnog unosa koordinata (reaktivni pregled na mapi)
   const latInput = document.getElementById('lat');
   const lngInput = document.getElementById('lng');
 
@@ -69,42 +62,27 @@ function setupEventListeners() {
     lngInput.addEventListener('input', updatePreviewFromInputs);
   }
 
-  // Export
   document.getElementById('exportGeoJsonBtn').addEventListener('click', exportGeoJSON);
   document.getElementById('exportCsvBtn').addEventListener('click', exportCSV);
 
-  // Forme za unose
   document.getElementById('locationForm').addEventListener('submit', handleAddFormSubmit);
   document.getElementById('editForm').addEventListener('submit', handleEditFormSubmit);
 
-  // Pretraga i sortiranje
   document.getElementById('searchInput').addEventListener('input', renderListView);
   document.getElementById('sortSelect').addEventListener('change', renderListView);
 
-  // Biometrijska autentifikacija (TouchID / FaceID / Fingerprint)
+  // BRZA BIOMETRIJSKA PRIJAVA DUGME
   const bioBtn = document.getElementById('biometricsBtn');
   if (bioBtn) {
     bioBtn.addEventListener('click', async () => {
-      const isAvailable = await isBiometricsAvailable();
-      if (!isAvailable) {
-        alert("Vaš uređaj ne podržava ili nema podešen otisak prsta / prepoznavanje lica.");
-        return;
-      }
-
-      const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
-
-      if (!isBioEnabled) {
-        await registerBiometrics();
-      } else {
-        const success = await authenticateWithBiometrics();
-        if (success) {
-          alert("Identitet potvrđen biometrijom! 🔓 Podaci otključani.");
-        }
+      const success = await authenticateWithBiometrics();
+      if (success) {
+        document.getElementById('authModal').classList.remove('open');
+        await checkAuthStatus();
       }
     });
   }
 
-  // Autentifikacija (Auth Modal)
   const authBtn = document.getElementById('authBtn');
   if (authBtn) {
     authBtn.addEventListener('click', async () => {
@@ -115,9 +93,11 @@ function setupEventListeners() {
           await checkAuthStatus();
         }
       } else {
-        // Napuni polje sačuvanim ključem pri otvaranju modala
-        const encInput = document.getElementById('encryptionKeyInput');
-        if (encInput) encInput.value = getSecretKey();
+        // Provjeri da li je biometrija aktivirana pa prikaži opciju
+        const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
+        const bioContainer = document.getElementById('bioFastLoginContainer');
+        if (bioContainer) bioContainer.style.display = isBioEnabled ? 'block' : 'none';
+
         document.getElementById('authModal').classList.add('open');
       }
     });
@@ -140,11 +120,6 @@ function setupEventListeners() {
       e.preventDefault();
       const email = document.getElementById('authEmail').value;
       const password = document.getElementById('authPassword').value;
-      const encKey = document.getElementById('encryptionKeyInput')?.value;
-
-      if (encKey) {
-        setSecretKey(encKey);
-      }
 
       try {
         if (isSignUpMode) {
@@ -153,6 +128,16 @@ function setupEventListeners() {
         } else {
           await signInUser(email, password);
           alert('Prijavljeni ste!');
+
+          // PONUDI REGISTRACIJU BIOMETRIJE NAKON PRVE USPEŠNE PRIJAVE
+          const bioAvailable = await isBiometricsAvailable();
+          const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
+          if (bioAvailable && !isBioEnabled) {
+            if (confirm("Želite li aktivirati Otisak Prsta / FaceID za brzu prijavu i enkripciju ubuduće?")) {
+              await registerBiometrics();
+            }
+          }
+
           await syncLocationsWithCloud();
           updateMapMarkers();
           renderListView();
@@ -176,7 +161,6 @@ async function checkAuthStatus() {
       if (authBtn) authBtn.innerText = 'Odjava (' + user.email.split('@')[0] + ')';
       if (syncStatus) syncStatus.innerText = '☁️ Povezano';
       
-      // Pokreće dvosmjernu sinhronizaciju i odmah osvježava prikaz mapi i liste
       await syncLocationsWithCloud();
       updateMapMarkers();
       renderListView();
@@ -214,7 +198,6 @@ async function handleAddFormSubmit(e) {
   const description = document.getElementById('description').value;
   const files = document.getElementById('imageInput').files;
 
-  // Kompresija slika prije spremanja i slanja
   const imagePromises = Array.from(files).map(file => compressImage(file));
   const images = await Promise.all(imagePromises);
 
@@ -234,7 +217,6 @@ async function handleAddFormSubmit(e) {
   updateCounts();
   alert('Lokacija sačuvana!');
 
-  // Pokušaj automatske sinhronizacije na cloud ako ima mreže
   await syncLocationsWithCloud();
   updateMapMarkers();
   renderListView();
@@ -374,7 +356,6 @@ async function handleEditFormSubmit(e) {
   const description = document.getElementById('editDescription').value;
   const files = document.getElementById('editNewImages').files;
 
-  // Kompresija novih slika pri uređivanju
   const newImages = await Promise.all(Array.from(files).map(file => compressImage(file)));
 
   updateLocation(id, { lat, lng, title, description, images: [...currentEditingImages, ...newImages], synced: false });
@@ -410,7 +391,6 @@ function registerServiceWorker() {
   }
 }
 
-// Pomoćna funkcija za smanjenje i kompresiju slika
 function compressImage(file, maxWidth = 1600, quality = 0.7) {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -423,7 +403,6 @@ function compressImage(file, maxWidth = 1600, quality = 0.7) {
         let width = img.width;
         let height = img.height;
 
-        // Skaliranje rezolucije uz očuvanje omjera (aspect ratio)
         if (width > maxWidth) {
           height = Math.round((height * maxWidth) / width);
           width = maxWidth;
@@ -435,7 +414,6 @@ function compressImage(file, maxWidth = 1600, quality = 0.7) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Kompresija u JPEG format sa 70% kvaliteta
         const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
         resolve(compressedBase64);
       };
@@ -443,7 +421,6 @@ function compressImage(file, maxWidth = 1600, quality = 0.7) {
   });
 }
 
-// Povezivanje modularnih funkcija sa globalnim window objektom za HTML događaje
 window.switchTab = switchTab;
 window.getCurrentLocation = getCurrentLocation;
 window.toggleRecording = toggleRecording;

@@ -61,11 +61,15 @@ export async function mergeLocations(cloudLocations) {
   localLocations.forEach(loc => map.set(String(loc.id), loc));
 
   for (const cloudLoc of cloudLocations) {
-    // 🔓 Dekripcija koordinata
-    const decryptedLat = parseFloat(decryptText(cloudLoc.lat));
-    const decryptedLng = parseFloat(decryptText(cloudLoc.lng));
+    const decLatRaw = decryptText(cloudLoc.lat);
+    const decLngRaw = decryptText(cloudLoc.lng);
 
-    // 🔓 Dekripcija slika sa clouda
+    let parsedLat = parseFloat(decLatRaw);
+    let parsedLng = parseFloat(decLngRaw);
+
+    if (isNaN(parsedLat)) parsedLat = parseFloat(cloudLoc.lat);
+    if (isNaN(parsedLng)) parsedLng = parseFloat(cloudLoc.lng);
+
     const decryptedImages = [];
     if (cloudLoc.images_urls && cloudLoc.images_urls.length > 0) {
       for (const imgUrl of cloudLoc.images_urls) {
@@ -74,7 +78,6 @@ export async function mergeLocations(cloudLocations) {
       }
     }
 
-    // 🔓 Dekripcija audio zapisa sa clouda
     let decryptedAudio = null;
     if (cloudLoc.audio_url) {
       decryptedAudio = await decryptMediaFromUrl(cloudLoc.audio_url);
@@ -82,10 +85,10 @@ export async function mergeLocations(cloudLocations) {
 
     map.set(String(cloudLoc.id), {
       id: String(cloudLoc.id),
-      lat: isNaN(decryptedLat) ? cloudLoc.lat : decryptedLat,
-      lng: isNaN(decryptedLng) ? cloudLoc.lng : decryptedLng,
-      title: decryptText(cloudLoc.title),
-      description: decryptText(cloudLoc.description),
+      lat: isNaN(parsedLat) ? 0 : parsedLat,
+      lng: isNaN(parsedLng) ? 0 : parsedLng,
+      title: decryptText(cloudLoc.title) || 'Neoznačeno',
+      description: decryptText(cloudLoc.description) || '',
       audio: decryptedAudio,
       images: decryptedImages,
       synced: true,

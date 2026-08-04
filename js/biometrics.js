@@ -1,4 +1,4 @@
-import { setSecretKey } from './crypto.js';
+import { setSecretKey, getSecretKey } from './crypto.js';
 
 export async function isBiometricsAvailable() {
   if (window.PublicKeyCredential && 
@@ -12,7 +12,7 @@ export async function isBiometricsAvailable() {
   return false;
 }
 
-// Registracija biometrije i generisanje biometrijskog AES ključa
+// 1. Registracija biometrije NAKON uspješne prijave
 export async function registerBiometrics() {
   const isAvailable = await isBiometricsAvailable();
   if (!isAvailable) {
@@ -48,26 +48,25 @@ export async function registerBiometrics() {
     });
 
     if (credential) {
-      // Generišemo jedinstveni biometrijski enkripcijski ključ iz ID-a biometrijskog akreditiva
+      // Generisanje jedinstvenog biometrijskog ključa iz akreditiva
       const rawBioKey = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
       setSecretKey(rawBioKey);
-
       localStorage.setItem('biometrics_enabled', 'true');
-      alert("Biometrijski ključ za enkripciju je uspješno kreiran i aktiviran! 🔐");
+      alert("Biometrijska prijava i enkripcija uspješno aktivirani! 🔐");
       return true;
     }
   } catch (err) {
     console.error("Greška pri biometrijskoj registraciji:", err);
-    alert("Biometrijska verifikacija nije uspjela ili je otkazana.");
     return false;
   }
 }
 
-// Otključavanje biometrijom i punjenje AES ključa u memoriju
+// 2. Brza autentifikacija biometrijom pri ulasku
 export async function authenticateWithBiometrics() {
   const isEnabled = localStorage.getItem('biometrics_enabled') === 'true';
   if (!isEnabled) {
-    return await registerBiometrics();
+    alert("Biometrija još nije aktivirana. Prijavite se prvo pomoću emaila i lozinke.");
+    return false;
   }
 
   try {
