@@ -29,3 +29,30 @@ export function deleteLocationFromDb(id) {
   localStorage.setItem(DB_KEY, JSON.stringify(locations));
   return locations;
 }
+
+export function mergeLocations(cloudLocations) {
+  const localLocations = getLocations();
+  const map = new Map();
+
+  // Prvo dodamo lokalne lokacije u mapu
+  localLocations.forEach(loc => map.set(String(loc.id), loc));
+
+  // Zatim dodamo ili prepišemo cloud lokacijama
+  cloudLocations.forEach(cloudLoc => {
+    map.set(String(cloudLoc.id), {
+      id: String(cloudLoc.id),
+      lat: cloudLoc.lat,
+      lng: cloudLoc.lng,
+      title: cloudLoc.title,
+      description: cloudLoc.description,
+      audio: cloudLoc.audio_url,
+      images: cloudLoc.images_urls || [],
+      synced: true,
+      timestamp: cloudLoc.timestamp
+    });
+  });
+
+  const merged = Array.from(map.values());
+  localStorage.setItem('saved_locations', JSON.stringify(merged));
+  return merged;
+}

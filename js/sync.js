@@ -1,5 +1,6 @@
 import { supabase, getCurrentUser } from './supabase.js';
-import { getLocations, updateLocation } from './db.js';
+import { getLocations, updateLocation, mergeLocations } from './db.js';
+import { updateMapMarkers } from './map.js';
 
 // Pretvaranje Base64 u Blob za upload
 function base64ToBlob(base64, mimeType) {
@@ -39,7 +40,36 @@ async function uploadFile(base64Data, bucket, path) {
   return urlData.publicUrl;
 }
 
-// Glavna sinhronizacija
+// Preuzimanje svih lokacija sa clouda za prijavljenog korisnika
+export async function downloadLocationsFromCloud() {
+  if (!navigator.onLine) return;
+
+  const user = await getCurrentUser();
+  if (!user) return;
+
+  try {
+    const { data, error } = await supabase
+      .from('locations')
+      .select('*')
+      .eq('user_id', user.id);
+
+    if (error) {
+      console.error("Greška pri preuzimanju sa clouda:", error);
+      return;
+    }
+
+    if (data && data.length > 0) {
+      mergeLocations(data);
+      if (typeof updateMapMarkers === 'function') {
+        updateMapMarkers();
+      }
+    }
+  } catch (err) {
+    console.error("Greška pri preuzimanju lokacija:", err);
+  }
+}
+
+// Glavna sinhronizacija (Upload + Download)
 export async function syncLocationsWithCloud() {
   if (!navigator.onLine) return;
 
@@ -49,16 +79,19 @@ export async function syncLocationsWithCloud() {
     return;
   }
 
+  // 1. Prvo preuzmi sve postojeće lokacije iz baze (Dvosmjerna sinhronizacija)
+  await downloadLocationsFromCloud();
+
   const locations = getLocations();
   const unsynced = locations.filter(l => !l.synced);
 
   if (unsynced.length === 0) return;
 
-  console.log(`Započinjem sinhronizaciju za ${unsynced.length} lokacija...`);
+  console.log(`Započinjem sinhronizaciju za ${unsynced.length} nesinhronizovanih lokacija...`);
 
   for (const loc of unsynced) {
     try {
-      // 1. Upload slika u Storage
+      // 2. Upload slika u Storage
       const imageUrls = [];
       if (loc.images && loc.images.length > 0) {
         for (let i = 0; i < loc.images.length; i++) {
@@ -67,13 +100,13 @@ export async function syncLocationsWithCloud() {
         }
       }
 
-      // 2. Upload zvuka u Storage
+      // 3. Upload zvuka u Storage
       let audioUrl = null;
       if (loc.audio) {
         audioUrl = await uploadFile(loc.audio, 'location-audio', `${user.id}/${loc.id}_audio`);
       }
 
-      // 3. Upsert u PostgreSQL bazu
+      // 4. Upsert u PostgreSQL bazu
       const { error: dbError } = await supabase.from('locations').upsert({
         id: loc.id,
         user_id: user.id,
@@ -91,7 +124,7 @@ export async function syncLocationsWithCloud() {
         throw new Error("Baza greška: " + dbError.message);
       }
 
-      // 4. Označi lokalno da je sačuvano
+      // 5. Označi lokalno da je sačuvano
       updateLocation(loc.id, { 
         synced: true, 
         images: imageUrls, 

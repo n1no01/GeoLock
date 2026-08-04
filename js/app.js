@@ -98,6 +98,8 @@ function setupEventListeners() {
           await signInUser(email, password);
           alert('Prijavljeni ste!');
           await syncLocationsWithCloud();
+          updateMapMarkers();
+          renderListView();
         }
         document.getElementById('authModal').classList.remove('open');
         await checkAuthStatus();
@@ -117,10 +119,16 @@ async function checkAuthStatus() {
     if (user) {
       if (authBtn) authBtn.innerText = 'Odjava (' + user.email.split('@')[0] + ')';
       if (syncStatus) syncStatus.innerText = '☁️ Povezano';
+      
+      // Pokreće dvosmjernu sinhronizaciju i odmah osvježava prikaz mapi i liste
       await syncLocationsWithCloud();
+      updateMapMarkers();
+      renderListView();
     } else {
       if (authBtn) authBtn.innerText = 'Prijava';
       if (syncStatus) syncStatus.innerText = '🔒 Lokalni rad';
+      updateMapMarkers();
+      renderListView();
     }
   } catch (err) {
     console.warn("Supabase auth nije konfigurisan ili nema mreže:", err);
@@ -171,11 +179,15 @@ async function handleAddFormSubmit(e) {
   alert('Lokacija sačuvana!');
 
   // Pokušaj automatske sinhronizacije na cloud ako ima mreže
-  syncLocationsWithCloud();
+  await syncLocationsWithCloud();
+  updateMapMarkers();
+  renderListView();
 }
 
 function renderListView() {
   const grid = document.getElementById('gridContainer');
+  if (!grid) return;
+  
   grid.innerHTML = '';
   const search = document.getElementById('searchInput').value.toLowerCase();
   const sortBy = document.getElementById('sortSelect').value;
@@ -283,7 +295,9 @@ function openEditModal(id) {
 }
 
 function renderEditGallery() {
-  const gallery = document.getElementById('editExistingGallery'); gallery.innerHTML = '';
+  const gallery = document.getElementById('editExistingGallery'); 
+  if (!gallery) return;
+  gallery.innerHTML = '';
   currentEditingImages.forEach((img, index) => {
     const item = document.createElement('div'); item.className = 'gallery-item';
     item.innerHTML = `<img src="${img}"><button type="button" class="delete-img-btn">&times;</button>`;
@@ -313,7 +327,9 @@ async function handleEditFormSubmit(e) {
   closeModal('editModal'); 
   openModal(id);
 
-  syncLocationsWithCloud();
+  await syncLocationsWithCloud();
+  updateMapMarkers();
+  renderListView();
 }
 
 function closeModal(id) { 
@@ -328,7 +344,8 @@ function openImageFull(src) {
 }
 
 function updateCounts() { 
-  document.getElementById('tab-count').innerText = getLocations().length; 
+  const el = document.getElementById('tab-count');
+  if (el) el.innerText = getLocations().length; 
 }
 
 function registerServiceWorker() {
