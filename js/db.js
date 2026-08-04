@@ -1,4 +1,5 @@
 import { supabase, getCurrentUser } from './supabase.js';
+import { decryptText, decryptMediaFromUrl } from './crypto.js';
 
 const DB_KEY = 'saved_locations';
 
@@ -8,7 +9,6 @@ export function getLocations() {
 
 export function saveLocation(location) {
   const locations = getLocations();
-  // Označavamo da novi unos po defaultu nije sinhronizovan sa cloudom
   location.synced = location.synced || false; 
   locations.push(location);
   localStorage.setItem(DB_KEY, JSON.stringify(locations));
@@ -26,12 +26,10 @@ export function updateLocation(id, updatedData) {
 }
 
 export async function deleteLocationFromDb(id) {
-  // 1. Ukloni odmah iz lokalne memorije (localStorage)
   let locations = getLocations();
   locations = locations.filter(l => String(l.id) !== String(id));
   localStorage.setItem(DB_KEY, JSON.stringify(locations));
 
-  // 2. Ako ima mreže i korisnik je prijavljen, obriši i iz Supabase baze
   if (navigator.onLine) {
     try {
       const user = await getCurrentUser();
@@ -56,27 +54,44 @@ export async function deleteLocationFromDb(id) {
   return locations;
 }
 
-export function mergeLocations(cloudLocations) {
+export async function mergeLocations(cloudLocations) {
   const localLocations = getLocations();
   const map = new Map();
 
-  // Prvo dodamo lokalne lokacije u mapu
   localLocations.forEach(loc => map.set(String(loc.id), loc));
 
-  // Zatim dodamo ili prepišemo cloud lokacijama
-  cloudLocations.forEach(cloudLoc => {
+  for (const cloudLoc of cloudLocations) {
+    // 🔓 Dekripcija koordinata
+    const decryptedLat = parseFloat(decryptText(cloudLoc.lat));
+    const decryptedLng = parseFloat(decryptText(cloudLoc.lng));
+
+    // 🔓 Dekripcija slika sa clouda
+    const decryptedImages = [];
+    if (cloudLoc.images_urls && cloudLoc.images_urls.length > 0) {
+      for (const imgUrl of cloudLoc.images_urls) {
+        const decImg = await decryptMediaFromUrl(imgUrl);
+        decryptedImages.push(decImg);
+      }
+    }
+
+    // 🔓 Dekripcija audio zapisa sa clouda
+    let decryptedAudio = null;
+    if (cloudLoc.audio_url) {
+      decryptedAudio = await decryptMediaFromUrl(cloudLoc.audio_url);
+    }
+
     map.set(String(cloudLoc.id), {
       id: String(cloudLoc.id),
-      lat: cloudLoc.lat,
-      lng: cloudLoc.lng,
-      title: cloudLoc.title,
-      description: cloudLoc.description,
-      audio: cloudLoc.audio_url,
-      images: cloudLoc.images_urls || [],
+      lat: isNaN(decryptedLat) ? cloudLoc.lat : decryptedLat,
+      lng: isNaN(decryptedLng) ? cloudLoc.lng : decryptedLng,
+      title: decryptText(cloudLoc.title),
+      description: decryptText(cloudLoc.description),
+      audio: decryptedAudio,
+      images: decryptedImages,
       synced: true,
       timestamp: cloudLoc.timestamp
     });
-  });
+  }
 
   const merged = Array.from(map.values());
   localStorage.setItem(DB_KEY, JSON.stringify(merged));

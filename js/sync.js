@@ -1,33 +1,19 @@
 import { supabase, getCurrentUser } from './supabase.js';
 import { getLocations, updateLocation, mergeLocations } from './db.js';
 import { updateMapMarkers } from './map.js';
+import { encryptText, encryptMediaBase64 } from './crypto.js';
 
-// Pretvaranje Base64 u Blob za upload
-function base64ToBlob(base64, mimeType) {
-  const byteCharacters = atob(base64.split(',')[1]);
-  const byteArrays = [];
-  for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-    const slice = byteCharacters.slice(offset, offset + 512);
-    const byteNumbers = new Array(slice.length);
-    for (let i = 0; i < slice.length; i++) {
-      byteNumbers[i] = slice.charCodeAt(i);
-    }
-    byteArrays.push(new Uint8Array(byteNumbers));
-  }
-  return new Blob(byteArrays, { type: mimeType });
-}
+// Upload enkriptovanog medijskog fajla u Storage
+async function uploadEncryptedFile(base64Data, bucket, path) {
+  if (!base64Data || base64Data.startsWith('http')) return base64Data;
 
-// Upload fajla u Storage
-async function uploadFile(base64Data, bucket, path) {
-  if (!base64Data || base64Data.startsWith('http')) return base64Data; // Ako je već public URL
+  const encryptedBlob = encryptMediaBase64(base64Data);
+  if (!encryptedBlob) throw new Error("Neuspješna enkripcija medijske datoteke.");
 
-  const mimeType = base64Data.split(';')[0].split(':')[1] || 'image/jpeg';
-  const blob = base64ToBlob(base64Data, mimeType);
-  const ext = mimeType.split('/')[1] || 'jpg';
-  const filePath = `${path}_${Date.now()}.${ext}`;
+  const filePath = `${path}_${Date.now()}.enc`;
 
-  const { data, error } = await supabase.storage.from(bucket).upload(filePath, blob, {
-    contentType: mimeType,
+  const { data, error } = await supabase.storage.from(bucket).upload(filePath, encryptedBlob, {
+    contentType: 'text/plain',
     upsert: true
   });
 
@@ -59,7 +45,7 @@ export async function downloadLocationsFromCloud() {
     }
 
     if (data && data.length > 0) {
-      mergeLocations(data);
+      await mergeLocations(data);
       if (typeof updateMapMarkers === 'function') {
         updateMapMarkers();
       }
@@ -87,35 +73,41 @@ export async function syncLocationsWithCloud() {
 
   if (unsynced.length === 0) return;
 
-  console.log(`Započinjem sinhronizaciju za ${unsynced.length} nesinhronizovanih lokacija...`);
+  console.log(`Započinjem Zero-Knowledge enkripciju i sinhronizaciju za ${unsynced.length} nesinhronizovanih lokacija...`);
 
   for (const loc of unsynced) {
     try {
-      // 2. Upload slika u Storage
+      // 2. Upload enkriptovanih slika
       const imageUrls = [];
       if (loc.images && loc.images.length > 0) {
         for (let i = 0; i < loc.images.length; i++) {
-          const url = await uploadFile(loc.images[i], 'location-images', `${user.id}/${loc.id}_img_${i}`);
+          const url = await uploadEncryptedFile(loc.images[i], 'location-images', `${user.id}/${loc.id}_img_${i}`);
           imageUrls.push(url);
         }
       }
 
-      // 3. Upload zvuka u Storage
+      // 3. Upload enkriptovanog zvuka
       let audioUrl = null;
       if (loc.audio) {
-        audioUrl = await uploadFile(loc.audio, 'location-audio', `${user.id}/${loc.id}_audio`);
+        audioUrl = await uploadEncryptedFile(loc.audio, 'location-audio', `${user.id}/${loc.id}_audio`);
       }
 
-      // 4. Upsert u PostgreSQL bazu
+      // 4. Enkripcija svih tekstualnih polja i koordinata pri slanju
+      const encryptedLat = encryptText(loc.lat);
+      const encryptedLng = encryptText(loc.lng);
+      const encryptedTitle = encryptText(loc.title);
+      const encryptedDescription = encryptText(loc.description);
+
+      // 5. Upsert u PostgreSQL bazu (sa enkriptovanim poljima)
       const { error: dbError } = await supabase.from('locations').upsert({
         id: loc.id,
         user_id: user.id,
-        lat: loc.lat,
-        lng: loc.lng,
-        title: loc.title,
-        description: loc.description,
-        audio_url: audioUrl,
-        images_urls: imageUrls,
+        lat: encryptedLat,             // Šifrovana latituda
+        lng: encryptedLng,             // Šifrovana longituda
+        title: encryptedTitle,         // Šifrovani naslov
+        description: encryptedDescription, // Šifrovani opis
+        audio_url: audioUrl,           // Šifrovani URL zvuka
+        images_urls: imageUrls,        // Šifrovani URL-ovi slika
         timestamp: loc.timestamp
       });
 
@@ -124,19 +116,19 @@ export async function syncLocationsWithCloud() {
         throw new Error("Baza greška: " + dbError.message);
       }
 
-      // 5. Označi lokalno da je sačuvano
+      // 6. Označi lokalno da je sačuvano
       updateLocation(loc.id, { 
         synced: true, 
         images: imageUrls, 
         audio: audioUrl 
       });
 
-      console.log(`Lokacija "${loc.title}" uspješno sinhronizovana!`);
+      console.log(`Lokacija "${loc.title}" kompletno enkriptovana i sinhronizovana!`);
 
     } catch (err) {
       console.error(`Greška pri sinhronizaciji lokacije ${loc.id}:`, err);
       alert(`Greška pri sinhronizaciji "${loc.title}":\n` + err.message);
-      break; // Prekida petlju ako dođe do greške radi dijagnostike
+      break;
     }
   }
 }

@@ -5,6 +5,8 @@ import { toggleRecording, getCurrentAudio, resetAudioState } from './audio.js';
 import { exportGeoJSON, exportCSV } from './export.js';
 import { signUpUser, signInUser, signOutUser, getCurrentUser, onAuthStateChange } from './supabase.js';
 import { syncLocationsWithCloud } from './sync.js';
+import { setSecretKey, getSecretKey } from './crypto.js';
+import { registerBiometrics, authenticateWithBiometrics, isBiometricsAvailable } from './biometrics.js';
 
 let currentEditingImages = [];
 let isSignUpMode = false;
@@ -79,6 +81,29 @@ function setupEventListeners() {
   document.getElementById('searchInput').addEventListener('input', renderListView);
   document.getElementById('sortSelect').addEventListener('change', renderListView);
 
+  // Biometrijska autentifikacija (TouchID / FaceID / Fingerprint)
+  const bioBtn = document.getElementById('biometricsBtn');
+  if (bioBtn) {
+    bioBtn.addEventListener('click', async () => {
+      const isAvailable = await isBiometricsAvailable();
+      if (!isAvailable) {
+        alert("Vaš uređaj ne podržava ili nema podešen otisak prsta / prepoznavanje lica.");
+        return;
+      }
+
+      const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
+
+      if (!isBioEnabled) {
+        await registerBiometrics();
+      } else {
+        const success = await authenticateWithBiometrics();
+        if (success) {
+          alert("Identitet potvrđen biometrijom! 🔓 Podaci otključani.");
+        }
+      }
+    });
+  }
+
   // Autentifikacija (Auth Modal)
   const authBtn = document.getElementById('authBtn');
   if (authBtn) {
@@ -90,6 +115,9 @@ function setupEventListeners() {
           await checkAuthStatus();
         }
       } else {
+        // Napuni polje sačuvanim ključem pri otvaranju modala
+        const encInput = document.getElementById('encryptionKeyInput');
+        if (encInput) encInput.value = getSecretKey();
         document.getElementById('authModal').classList.add('open');
       }
     });
@@ -112,6 +140,11 @@ function setupEventListeners() {
       e.preventDefault();
       const email = document.getElementById('authEmail').value;
       const password = document.getElementById('authPassword').value;
+      const encKey = document.getElementById('encryptionKeyInput')?.value;
+
+      if (encKey) {
+        setSecretKey(encKey);
+      }
 
       try {
         if (isSignUpMode) {
@@ -292,7 +325,7 @@ function openModal(id) {
   document.getElementById('modalMapBtn').onclick = () => { closeModal('detailsModal'); switchTab('map-view'); centerMap(loc.lat, loc.lng); };
   document.getElementById('modalDeleteBtn').onclick = async () => { 
     if (confirm('Obrišite lokaciju?')) { 
-      deleteLocationFromDb(loc.id); 
+      await deleteLocationFromDb(loc.id); 
       updateMapMarkers(); 
       renderListView(); 
       closeModal('detailsModal'); 
