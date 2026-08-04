@@ -1,5 +1,5 @@
 import { getLocations, saveLocation, updateLocation, deleteLocationFromDb } from './db.js';
-import { initMap, updateMapMarkers, centerMap, invalidateMapSize } from './map.js';
+import { initMap, updateMapMarkers, centerMap, invalidateMapSize, previewLocation } from './map.js';
 import { getCurrentLocation } from './gps.js';
 import { toggleRecording, getCurrentAudio, resetAudioState } from './audio.js';
 import { exportGeoJSON, exportCSV } from './export.js';
@@ -41,8 +41,31 @@ function setupEventListeners() {
   document.getElementById('tabListBtn').addEventListener('click', () => switchTab('list-view'));
 
   // GPS i Snimanje
-  document.getElementById('gpsBtn').addEventListener('click', getCurrentLocation);
+  const gpsBtn = document.getElementById('gpsBtn');
+  if (gpsBtn) {
+    gpsBtn.addEventListener('click', async () => {
+      await getCurrentLocation();
+      updatePreviewFromInputs();
+    });
+  }
   document.getElementById('recordBtn').addEventListener('click', toggleRecording);
+
+  // Osluškivanje ručnog unosa koordinata (reaktivni pregled na mapi)
+  const latInput = document.getElementById('lat');
+  const lngInput = document.getElementById('lng');
+
+  const updatePreviewFromInputs = () => {
+    const lat = parseFloat(latInput.value);
+    const lng = parseFloat(lngInput.value);
+    if (!isNaN(lat) && !isNaN(lng)) {
+      previewLocation(lat, lng);
+    }
+  };
+
+  if (latInput && lngInput) {
+    latInput.addEventListener('input', updatePreviewFromInputs);
+    lngInput.addEventListener('input', updatePreviewFromInputs);
+  }
 
   // Export
   document.getElementById('exportGeoJsonBtn').addEventListener('click', exportGeoJSON);

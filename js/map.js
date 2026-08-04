@@ -2,6 +2,7 @@ import { getLocations } from './db.js';
 
 let map;
 const markers = [];
+let tempMarker = null;
 
 export function initMap(onMapClickCallback) {
   const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OSM' });
@@ -11,11 +12,46 @@ export function initMap(onMapClickCallback) {
   L.control.layers({ "Karta": osmLayer, "Satelit": esriSatelliteLayer }).addTo(map);
 
   map.on('click', e => {
-    if (onMapClickCallback) onMapClickCallback(e.latlng.lat, e.latlng.lng);
+    const lat = e.latlng.lat;
+    const lng = e.latlng.lng;
+
+    // Pomjeri privremeni marker pri kliku bilo gdje na mapu
+    previewLocation(lat, lng);
+
+    if (onMapClickCallback) onMapClickCallback(lat, lng);
   });
 
   updateMapMarkers();
   return map;
+}
+
+// Funkcija za pomjeranje privremenog markera (reaktivni pregled pri kucanju ili kliku)
+export function previewLocation(lat, lng) {
+  if (!map || isNaN(lat) || isNaN(lng)) return;
+
+  const latLng = [lat, lng];
+
+  if (tempMarker) {
+    tempMarker.setLatLng(latLng);
+  } else {
+    // Kreiramo marker koji se može prevlačiti prstom/mišem po mapi
+    tempMarker = L.marker(latLng, { draggable: true }).addTo(map);
+
+    // Kada korisnik završi prevlačenje markera, ažuriraj polja u formi
+    tempMarker.on('dragend', (event) => {
+      const position = event.target.getLatLng();
+      const latInput = document.getElementById('lat');
+      const lngInput = document.getElementById('lng');
+
+      if (latInput && lngInput) {
+        latInput.value = position.lat.toFixed(6);
+        lngInput.value = position.lng.toFixed(6);
+      }
+    });
+  }
+
+  // Blago pomjeri mapu na novu poziciju
+  map.panTo(latLng);
 }
 
 export function updateMapMarkers() {
