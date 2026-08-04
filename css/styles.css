@@ -1,7 +1,22 @@
-* { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
-body { display: flex; flex-direction: column; height: 100vh; margin: 0; background: #f1f5f9; overflow: hidden; }
+* { 
+  box-sizing: border-box; 
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+  -webkit-tap-highlight-color: transparent; 
+}
 
-/* OPTIMIZOVANO ZAGLAVČJE (HEADER) */
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #f1f5f9;
+}
+
+body { 
+  display: flex; 
+  flex-direction: column; 
+}
+
+/* OPTIMIZOVANO ZAGLAVČJE */
 header { 
   background: #0f172a; 
   color: white; 
@@ -12,6 +27,7 @@ header {
   height: 56px; 
   flex-shrink: 0; 
   gap: 8px;
+  z-index: 20;
 }
 
 header h1 { 
@@ -34,12 +50,10 @@ header h1 {
   flex-shrink: 0;
 }
 
-/* NAVIGACIJSKI TABOVI */
 .nav-tabs { display: flex; gap: 4px; }
 .tab-btn { background: transparent; border: none; color: #94a3b8; padding: 6px 8px; font-weight: 600; cursor: pointer; border-radius: 6px; font-size: 12px; }
 .tab-btn.active { background: #2563eb; color: white; }
 
-/* STILOVI ZA PRIJAVU I STATUS */
 .auth-btn {
   background: #2563eb;
   color: white;
@@ -63,19 +77,74 @@ header h1 {
   border: 1px solid #334155;
 }
 
-main { flex: 1; position: relative; overflow: hidden; display: flex; }
-.tab-content { display: none; width: 100%; height: 100%; }
-.tab-content.active { display: flex; }
-
-#map-view { flex-direction: column; }
-@media (min-width: 768px) {
-  #map-view { flex-direction: row; }
-  #sidebar-add { width: 360px !important; height: 100% !important; border-right: 1px solid #cbd5e1; border-top: none !important; }
+/* MAIN I TABOVI */
+main { 
+  flex: 1; 
+  position: relative; 
+  display: flex; 
+  overflow: hidden;
 }
 
-#sidebar-add { width: 100%; height: 55%; padding: 15px; background: white; overflow-y: auto; z-index: 10; border-top: 1px solid #cbd5e1; order: 2; }
-#map { flex: 1; width: 100%; height: 100%; min-height: 200px; order: 1; }
+.tab-content { 
+  display: none; 
+  width: 100%; 
+  height: 100%; 
+}
 
+.tab-content.active { 
+  display: flex; 
+}
+
+/* MOBILNI LAYOUT ZA MAPU I FORMU */
+#map-view { 
+  flex-direction: column; 
+  overflow-y: auto; 
+  -webkit-overflow-scrolling: touch;
+}
+
+#map { 
+  width: 100%; 
+  height: 250px; 
+  min-height: 220px; 
+  flex-shrink: 0; 
+  order: 1; 
+}
+
+#sidebar-add { 
+  width: 100%; 
+  padding: 16px; 
+  background: white; 
+  z-index: 10; 
+  border-top: 1px solid #cbd5e1; 
+  order: 2; 
+  padding-bottom: 40px; 
+}
+
+/* DESKTOP LAYOUT (768px+) */
+@media (min-width: 768px) {
+  #map-view { 
+    flex-direction: row; 
+    overflow: hidden; 
+  }
+
+  #map { 
+    flex: 1; 
+    height: 100% !important; 
+    order: 1; 
+  }
+
+  #sidebar-add { 
+    width: 380px !important; 
+    height: 100% !important; 
+    overflow-y: auto; 
+    border-right: 1px solid #cbd5e1; 
+    border-top: none !important; 
+    order: 2; 
+    padding-bottom: 20px;
+  }
+}
+
+/* LISTA I KONTROLE */
 #list-view { flex-direction: column; padding: 12px; overflow-y: auto; width: 100%; }
 .controls-bar { display: flex; flex-direction: column; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid #cbd5e1; margin-bottom: 12px; }
 @media (min-width: 600px) {
@@ -92,7 +161,7 @@ main { flex: 1; position: relative; overflow: hidden; display: flex; }
 .card-thumb { width: 100%; height: 120px; object-fit: cover; background: #e2e8f0; }
 .card-footer { padding: 8px 12px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
 
-/* MODALNI PROZORI */
+/* MODALI */
 .modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(2px); z-index: 9999; justify-content: center; align-items: flex-end; }
 @media (min-width: 600px) { .modal-backdrop { align-items: center; padding: 20px; } }
 .modal-backdrop.open { display: flex; }
@@ -108,17 +177,36 @@ main { flex: 1; position: relative; overflow: hidden; display: flex; }
 .gallery-item img { width: 100%; height: 100px; object-fit: cover; display: block; }
 .delete-img-btn { position: absolute; top: 4px; right: 4px; background: rgba(239, 68, 68, 0.9); color: white; border: none; border-radius: 4px; padding: 2px 6px; font-size: 10px; }
 
-.form-group { margin-bottom: 10px; }
-.form-group label { display: block; font-weight: 600; margin-bottom: 3px; font-size: 11px; color: #475569; }
-.form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
-.btn { padding: 10px 14px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; min-height: 40px; }
+/* OPTIMIZACIJA FORMI ZA DODIR (MOBILNI) */
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 12px; color: #475569; }
+.form-group input, .form-group textarea, .form-group select { 
+  width: 100%; 
+  padding: 12px; 
+  border: 1px solid #cbd5e1; 
+  border-radius: 8px; 
+  font-size: 16px; /* Prevents auto-zoom u iOS Safariju */
+}
+
+.btn { 
+  padding: 12px 16px; 
+  background: #2563eb; 
+  color: white; 
+  border: none; 
+  border-radius: 8px; 
+  cursor: pointer; 
+  font-weight: 600; 
+  font-size: 14px; 
+  min-height: 44px;
+  width: 100%;
+}
 .btn:active { opacity: 0.8; }
-.btn-gps { background: #059669; display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-bottom: 10px; }
+.btn-gps { background: #059669; display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-bottom: 12px; }
 .btn-danger { background: #ef4444; }
 .btn-secondary { background: #64748b; }
 .btn-warning { background: #d97706; }
 
-.audio-recorder { background: #f8fafc; padding: 10px; border: 1px dashed #cbd5e1; border-radius: 6px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+.audio-recorder { background: #f8fafc; padding: 12px; border: 1px dashed #cbd5e1; border-radius: 8px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
 .audio-ctrls { display: flex; gap: 8px; align-items: center; }
 .btn-record { background: #dc2626; flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .btn-record.recording { animation: pulse 1.2s infinite; background: #991b1b; }
