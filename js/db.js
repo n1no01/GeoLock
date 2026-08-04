@@ -1,3 +1,5 @@
+import { supabase, getCurrentUser } from './supabase.js';
+
 const DB_KEY = 'saved_locations';
 
 export function getLocations() {
@@ -23,10 +25,34 @@ export function updateLocation(id, updatedData) {
   return locations;
 }
 
-export function deleteLocationFromDb(id) {
+export async function deleteLocationFromDb(id) {
+  // 1. Ukloni odmah iz lokalne memorije (localStorage)
   let locations = getLocations();
   locations = locations.filter(l => String(l.id) !== String(id));
   localStorage.setItem(DB_KEY, JSON.stringify(locations));
+
+  // 2. Ako ima mreže i korisnik je prijavljen, obriši i iz Supabase baze
+  if (navigator.onLine) {
+    try {
+      const user = await getCurrentUser();
+      if (user) {
+        const { error } = await supabase
+          .from('locations')
+          .delete()
+          .eq('id', id)
+          .eq('user_id', user.id);
+
+        if (error) {
+          console.error("Greška pri brisanju sa Supabase clouda:", error);
+        } else {
+          console.log(`Lokacija ${id} uspješno uklonjena iz Supabase baze.`);
+        }
+      }
+    } catch (err) {
+      console.error("Greška pri komunikaciji sa bazom tokom brisanja:", err);
+    }
+  }
+
   return locations;
 }
 
@@ -53,6 +79,6 @@ export function mergeLocations(cloudLocations) {
   });
 
   const merged = Array.from(map.values());
-  localStorage.setItem('saved_locations', JSON.stringify(merged));
+  localStorage.setItem(DB_KEY, JSON.stringify(merged));
   return merged;
 }

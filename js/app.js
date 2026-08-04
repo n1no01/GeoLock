@@ -290,7 +290,7 @@ function openModal(id) {
 
   document.getElementById('modalEditBtn').onclick = () => { closeModal('detailsModal'); openEditModal(loc.id); };
   document.getElementById('modalMapBtn').onclick = () => { closeModal('detailsModal'); switchTab('map-view'); centerMap(loc.lat, loc.lng); };
-  document.getElementById('modalDeleteBtn').onclick = () => { 
+  document.getElementById('modalDeleteBtn').onclick = async () => { 
     if (confirm('Obrišite lokaciju?')) { 
       deleteLocationFromDb(loc.id); 
       updateMapMarkers(); 
