@@ -3,6 +3,7 @@ import { getLocations } from './db.js';
 let map = null;
 let markersGroup = null;
 let previewMarker = null;
+let gpsCircle = null;
 
 export function initMap(onMapClickCallback) {
   map = L.map('map').setView([44.0, 17.8], 7);
@@ -72,6 +73,27 @@ export function previewLocation(lat, lng) {
   }
 
   map.panTo([parsedLat, parsedLng]);
+}
+
+// 📍 Prikaz kruga preciznosti za GPS lokaciju
+export function addGpsCircle(lat, lng, accuracy) {
+  if (!map) return;
+
+  const parsedLat = parseFloat(lat);
+  const parsedLng = parseFloat(lng);
+
+  if (isNaN(parsedLat) || isNaN(parsedLng)) return;
+
+  if (gpsCircle) {
+    map.removeLayer(gpsCircle);
+  }
+
+  gpsCircle = L.circle([parsedLat, parsedLng], {
+    radius: accuracy || 10,
+    color: '#2563eb',
+    fillColor: '#3b82f6',
+    fillOpacity: 0.2
+  }).addTo(map);
 }
 
 export function invalidateMapSize() {
