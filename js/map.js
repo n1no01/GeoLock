@@ -6,12 +6,31 @@ let previewMarker = null;
 let gpsCircle = null;
 
 export function initMap(onMapClickCallback) {
-  map = L.map('map').setView([44.0, 17.8], 7);
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  // 🗺️ Standardni sloj (OpenStreetMap)
+  const streetTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap'
-  }).addTo(map);
+  });
+
+  // 🛰️ Satelitski sloj (Esri World Imagery)
+  const satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 18,
+    attribution: 'Tiles © Esri'
+  });
+
+  // Inicijalizacija mape sa standardnim slojem
+  map = L.map('map', {
+    center: [44.0, 17.8],
+    zoom: 7,
+    layers: [streetTiles]
+  });
+
+  // 🎛️ Kontrola za prebacivanje slojeva (gornji desni ugao)
+  const baseMaps = {
+    "Standardna": streetTiles,
+    "Satelitska": satelliteTiles
+  };
+  L.control.layers(baseMaps).addTo(map);
 
   markersGroup = L.layerGroup().addTo(map);
 
