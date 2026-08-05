@@ -71,7 +71,23 @@ function setupEventListeners() {
   document.getElementById('searchInput').addEventListener('input', renderListView);
   document.getElementById('sortSelect').addEventListener('change', renderListView);
 
-  // BRZA BIOMETRIJSKA PRIJAVA DUGME
+  // DUGME ZA BIOMETRIJU U HEADERU (NAKNADNO DODAVANJE)
+  const enableBioHeaderBtn = document.getElementById('enableBioHeaderBtn');
+  if (enableBioHeaderBtn) {
+    enableBioHeaderBtn.addEventListener('click', async () => {
+      const bioAvailable = await isBiometricsAvailable();
+      if (!bioAvailable) {
+        alert("Vaš uređaj ne podržava biometrijsku autentifikaciju.");
+        return;
+      }
+      const success = await registerBiometrics();
+      if (success) {
+        await checkAuthStatus();
+      }
+    });
+  }
+
+  // BRZA BIOMETRIJSKA PRIJAVNO DUGME U MODALU
   const bioBtn = document.getElementById('biometricsBtn');
   if (bioBtn) {
     bioBtn.addEventListener('click', async () => {
@@ -93,7 +109,6 @@ function setupEventListeners() {
           await checkAuthStatus();
         }
       } else {
-        // Provjeri da li je biometrija aktivirana pa prikaži opciju
         const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
         const bioContainer = document.getElementById('bioFastLoginContainer');
         if (bioContainer) bioContainer.style.display = isBioEnabled ? 'block' : 'none';
@@ -129,7 +144,6 @@ function setupEventListeners() {
           await signInUser(email, password);
           alert('Prijavljeni ste!');
 
-          // PONUDI REGISTRACIJU BIOMETRIJE NAKON PRVE USPEŠNE PRIJAVE
           const bioAvailable = await isBiometricsAvailable();
           const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
           if (bioAvailable && !isBioEnabled) {
@@ -156,10 +170,31 @@ async function checkAuthStatus() {
     const user = await getCurrentUser();
     const authBtn = document.getElementById('authBtn');
     const syncStatus = document.getElementById('syncStatus');
+    const bioHeaderContainer = document.getElementById('bioHeaderContainer');
+    const enableBioHeaderBtn = document.getElementById('enableBioHeaderBtn');
 
     if (user) {
       if (authBtn) authBtn.innerText = 'Odjava (' + user.email.split('@')[0] + ')';
       if (syncStatus) syncStatus.innerText = '☁️ Povezano';
+
+      // Prikaz biometrijskog dugmeta/statusa u headeru
+      const bioAvailable = await isBiometricsAvailable();
+      const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
+
+      if (bioAvailable && bioHeaderContainer) {
+        bioHeaderContainer.style.display = 'block';
+        if (isBioEnabled) {
+          enableBioHeaderBtn.innerText = '👆 Biometrija Aktivna';
+          enableBioHeaderBtn.style.background = '#15803d'; // Zelena boja
+          enableBioHeaderBtn.disabled = true;
+        } else {
+          enableBioHeaderBtn.innerText = '👆 Omogući Biometriju';
+          enableBioHeaderBtn.style.background = '#334155';
+          enableBioHeaderBtn.disabled = false;
+        }
+      } else if (bioHeaderContainer) {
+        bioHeaderContainer.style.display = 'none';
+      }
       
       await syncLocationsWithCloud();
       updateMapMarkers();
@@ -167,6 +202,7 @@ async function checkAuthStatus() {
     } else {
       if (authBtn) authBtn.innerText = 'Prijava';
       if (syncStatus) syncStatus.innerText = '🔒 Lokalni rad';
+      if (bioHeaderContainer) bioHeaderContainer.style.display = 'none';
       updateMapMarkers();
       renderListView();
     }
