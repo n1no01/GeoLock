@@ -1,4 +1,4 @@
-import { setSecretKey, getSecretKey } from './crypto.js';
+import { getSecretKey, setSecretKey } from './crypto.js';
 
 export async function isBiometricsAvailable() {
   if (window.PublicKeyCredential && 
@@ -12,11 +12,17 @@ export async function isBiometricsAvailable() {
   return false;
 }
 
-// 1. Registracija biometrije NAKON uspješne prijave
+// Registracija biometrije na uređaju
 export async function registerBiometrics() {
   const isAvailable = await isBiometricsAvailable();
   if (!isAvailable) {
     alert("Vaš uređaj ne podržava biometrijsku autentifikaciju.");
+    return false;
+  }
+
+  const currentKey = getSecretKey();
+  if (!currentKey) {
+    alert("Prvo se prijavite pomoću emaila i lozinke kako bi se generisao enkripcijski ključ.");
     return false;
   }
 
@@ -48,11 +54,10 @@ export async function registerBiometrics() {
     });
 
     if (credential) {
-      // Generisanje jedinstvenog biometrijskog ključa iz akreditiva
-      const rawBioKey = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
-      setSecretKey(rawBioKey);
+      // Sačuvamo AES ključ u LocalStorage označen kao biometrijski zaštićen
+      localStorage.setItem('bio_vault_key', currentKey);
       localStorage.setItem('biometrics_enabled', 'true');
-      alert("Biometrijska prijava i enkripcija uspješno aktivirani! 🔐");
+      alert("Otisak prsta / FaceID uspješno povezan sa vašim nalogom na ovom uređaju! 🔐");
       return true;
     }
   } catch (err) {
@@ -61,11 +66,13 @@ export async function registerBiometrics() {
   }
 }
 
-// 2. Brza autentifikacija biometrijom pri ulasku
+// Autentifikacija biometrijom pri ulasku
 export async function authenticateWithBiometrics() {
   const isEnabled = localStorage.getItem('biometrics_enabled') === 'true';
-  if (!isEnabled) {
-    alert("Biometrija još nije aktivirana. Prijavite se prvo pomoću emaila i lozinke.");
+  const storedKey = localStorage.getItem('bio_vault_key');
+
+  if (!isEnabled || !storedKey) {
+    alert("Biometrija nije aktivirana na ovom uređaju. Prijavite se emailom i lozinkom.");
     return false;
   }
 
@@ -84,8 +91,8 @@ export async function authenticateWithBiometrics() {
     });
 
     if (assertion) {
-      const rawBioKey = btoa(String.fromCharCode(...new Uint8Array(assertion.rawId)));
-      setSecretKey(rawBioKey);
+      // Otključavamo sačuvani AES ključ naloga
+      setSecretKey(storedKey);
       console.log("Biometrijska verifikacija uspješna! Enkripcijski ključ otključan. 🔓");
       return true;
     }

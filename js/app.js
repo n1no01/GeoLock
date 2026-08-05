@@ -6,6 +6,7 @@ import { exportGeoJSON, exportCSV } from './export.js';
 import { signUpUser, signInUser, signOutUser, getCurrentUser, onAuthStateChange } from './supabase.js';
 import { syncLocationsWithCloud } from './sync.js';
 import { registerBiometrics, authenticateWithBiometrics, isBiometricsAvailable } from './biometrics.js';
+import { deriveKeyFromCredentials } from './crypto.js';
 
 let currentEditingImages = [];
 let isSignUpMode = false;
@@ -136,6 +137,9 @@ function setupEventListeners() {
       const email = document.getElementById('authEmail').value;
       const password = document.getElementById('authPassword').value;
 
+      // 🔐 Automatsko izvođenje identičnog AES ključa iz Emaila i Lozinke
+      deriveKeyFromCredentials(email, password);
+
       try {
         if (isSignUpMode) {
           await signUpUser(email, password);
@@ -147,7 +151,7 @@ function setupEventListeners() {
           const bioAvailable = await isBiometricsAvailable();
           const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
           if (bioAvailable && !isBioEnabled) {
-            if (confirm("Želite li aktivirati Otisak Prsta / FaceID za brzu prijavu i enkripciju ubuduće?")) {
+            if (confirm("Želite li aktivirati Otisak Prsta / FaceID za brzu prijavu na ovom uređaju?")) {
               await registerBiometrics();
             }
           }
@@ -159,7 +163,7 @@ function setupEventListeners() {
         document.getElementById('authModal').classList.remove('open');
         await checkAuthStatus();
       } catch (err) {
-        alert('Greška: ' + err.message);
+        alert('Greška pri prijavi: ' + err.message);
       }
     });
   }
