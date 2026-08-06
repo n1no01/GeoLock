@@ -8,13 +8,13 @@ export function getCurrentLocation() {
       return reject(new Error("Geolocation not supported"));
     }
     
-    if (status) status.innerText = "🛰️ Traženje GPS signala (offline)...";
+    if (status) status.innerText = "🛰️ Traženje GPS lokacije...";
     
-    // Prvi pokušaj: Stroga preciznost sa dužim timeout-om za offline rad
+    // Opcije koje daju šansu uređaju da vrati bilo kakvu keširanu/brzu lokaciju
     const options = {
-      enableHighAccuracy: true,
-      timeout: 15000, // Produženo na 15 sekundi da GPS čip stigne uhvatiti satelite
-      maximumAge: 5000 // Dozvoli keširanu lokaciju staru do 5 sekundi
+      enableHighAccuracy: false, // Krećemo sa brzim lociranjem (Wi-Fi / toranj) da ne čekaš predugo
+      timeout: 10000, 
+      maximumAge: 30000 // Dozvoli malo stariju keširanu lokaciju da odmah reaguje
     };
 
     navigator.geolocation.getCurrentPosition(
@@ -33,9 +33,11 @@ export function getCurrentLocation() {
         resolve({ lat, lng });
       },
       (err) => {
-        console.warn("Prvi GPS pokušaj nije uspio, probavam rezervni režim:", err.message);
+        console.warn("Brzi GPS nije uspio, pokušavam sa visokom preciznošću...", err.message);
         
-        // Drugi pokušaj (Fallback): Opšta preciznost (ako je prvi istekao)
+        if (status) status.innerText = "🛰️ Preciznije traženje satelita...";
+
+        // Drugi pokušaj: Forsiramo pravi GPS ako prvi brzi način omane
         navigator.geolocation.getCurrentPosition(
           (pos) => {
             const lat = parseFloat(pos.coords.latitude.toFixed(6));
@@ -44,7 +46,7 @@ export function getCurrentLocation() {
 
             document.getElementById('lat').value = lat;
             document.getElementById('lng').value = lng;
-            if (status) status.innerText = `✓ GPS očitan (Rezervni signal)`;
+            if (status) status.innerText = `✓ GPS očitan (Preciznost: ~${accuracy}m)`;
             
             centerMap(lat, lng, 16);
             addGpsCircle(lat, lng, accuracy);
@@ -53,10 +55,10 @@ export function getCurrentLocation() {
           },
           (fallbackErr) => {
             console.error("GPS greška:", fallbackErr);
-            if (status) status.innerText = "❌ GPS signal nedostupan. Provjerite dozvole.";
+            if (status) status.innerText = "❌ GPS signal nedostupan.";
             reject(fallbackErr);
           },
-          { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+          { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 } // Povećano na 20s za pravi GPS
         );
       },
       options
