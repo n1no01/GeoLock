@@ -36,7 +36,9 @@ export function initMap(onMapClickCallback) {
   satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 18,
     minZoom: 1,
-    attribution: 'Tiles © Esri'
+    attribution: 'Tiles © Esri',
+    crossOrigin: true,
+    detectRetina: true
   });
 
   // Inicijalizacija mape sa standardnim slojem
