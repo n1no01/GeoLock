@@ -87,7 +87,7 @@
 
         <div class="form-group">
           <label>Fotografije s terena:</label>
-          <input type="file" id="imageInput" accept="image/*" multiple capture="environment">
+          <input type="file" id="imageInput" accept="image/*" multiple>
         </div>
         <button type="submit" class="btn" style="width: 100%;">Sačuvaj Lokaciju</button>
       </form>
@@ -158,7 +158,7 @@
         <div class="form-group"><label>Naziv:</label><input type="text" id="editTitle" required></div>
         <div class="form-group"><label>Opis:</label><textarea id="editDescription" rows="3"></textarea></div>
         <div class="form-group"><label>Slike:</label><div id="editExistingGallery" class="modal-gallery"></div></div>
-        <div class="form-group"><label>Dodaj nove slike:</label><input type="file" id="editNewImages" accept="image/*" multiple capture="environment"></div>
+        <div class="form-group"><label>Dodaj nove slike:</label><input type="file" id="editNewImages" accept="image/*" multiple></div>
         <div style="margin-top: 15px; display: flex; gap: 8px;">
           <button type="button" class="btn btn-secondary" onclick="document.getElementById('editModal').classList.remove('open')" style="flex:1;">Odustani</button>
           <button type="submit" class="btn" style="flex:1;">Sačuvaj</button>
