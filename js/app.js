@@ -7,6 +7,7 @@ import { signUpUser, signInUser, signOutUser, getCurrentUser, onAuthStateChange 
 import { syncLocationsWithCloud } from './sync.js';
 import { registerBiometrics, authenticateWithBiometrics, isBiometricsAvailable } from './biometrics.js';
 import { deriveKeyFromCredentials } from './crypto.js';
+import * as mgrs from 'mgrs';
 
 let currentEditingImages = [];
 let isSignUpMode = false;
@@ -501,6 +502,48 @@ function showToast(message, type = 'info', duration = 2500) {
     toast.classList.remove('show');
   }, duration);
 }
+
+// Automatska konverzija dok korisnik tipka Lat/Lng -> MGRS
+const latInput = document.getElementById('lat');
+const lngInput = document.getElementById('lng');
+const mgrsInput = document.getElementById('mgrsInput');
+
+function updateMgrsFromLatLng() {
+  const lat = parseFloat(latInput.value);
+  const lng = parseFloat(lngInput.value);
+  if (!isNaN(lat) && !isNaN(lng)) {
+    try {
+      // mgrs.forward prima [longitude, latitude] i vraća MGRS string
+      const mgrsString = mgrs.forward([lng, lat], 5); // preciznost na 1 metar
+      mgrsInput.value = mgrsString;
+    } catch (e) {
+      // Ignoriši grešku ako su koordinate nevažeće tokom tipkanja
+    }
+  }
+}
+
+function updateLatLngFromMgrs() {
+  const val = mgrsInput.value.trim();
+  if (val.length > 5) {
+    try {
+      // mgrs.toPoint vraća [longitude, latitude]
+      const lngLat = mgrs.toPoint(val);
+      latInput.value = lngLat[1].toFixed(6);
+      lngInput.value = lngLat[0].toFixed(6);
+      
+      // Opciono: ako želiš da se mapa odmah pomjeri na uneseni MGRS
+      if (typeof previewLocation === 'function') {
+        previewLocation(lngLat[1], lngLat[0]);
+      }
+    } catch (e) {
+      // Nevažeći MGRS format
+    }
+  }
+}
+
+latInput.addEventListener('input', updateMgrsFromLatLng);
+lngInput.addEventListener('input', updateMgrsFromLatLng);
+mgrsInput.addEventListener('input', updateLatLngFromMgrs);
 
 window.switchTab = switchTab;
 window.getCurrentLocation = getCurrentLocation;

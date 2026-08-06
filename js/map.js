@@ -1,6 +1,7 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getLocations } from './db.js';
+import * as mgrs from 'mgrs';
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -53,9 +54,9 @@ export function initMap(onMapClickCallback) {
   });
 
   L.Control.geocoder({
-  defaultMarkGeocode: true,
-  placeholder: "Pretraži lokaciju ili adresu..."
-}).addTo(map);
+    defaultMarkGeocode: true,
+    placeholder: "Pretraži lokaciju ili adresu..."
+  }).addTo(map);
 
   // 🎛️ Kreiranje custom Toggle dugmeta
   addMapToggleControl();
@@ -71,6 +72,35 @@ export function initMap(onMapClickCallback) {
   });
 
   updateMapMarkers();
+}
+
+// 🌐 Pomoćna funkcija za parsiranje unosa (podržava i MGRS i obične koordinate)
+export function parseLocationInput(input) {
+  if (!input || typeof input !== 'string') return null;
+  
+  const trimmed = input.trim();
+
+  // Pokušaj konverzije MGRS stringa u tačku
+  try {
+    const lngLat = mgrs.toPoint(trimmed);
+    // mgrs.toPoint vraća [longitude, latitude]
+    return {
+      lat: lngLat[1],
+      lng: lngLat[0],
+      type: 'mgrs'
+    };
+  } catch (e) {
+    // Ako nije MGRS, provjeravamo da li su obične koordinate odvojene zarezom (lat, lng)
+    const parts = trimmed.split(',');
+    if (parts.length === 2) {
+      const lat = parseFloat(parts[0]);
+      const lng = parseFloat(parts[1]);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        return { lat, lng, type: 'dec' };
+      }
+    }
+    return null;
+  }
 }
 
 // 🔘 Sigurni Toggle sistem za prebacivanje slojeva
