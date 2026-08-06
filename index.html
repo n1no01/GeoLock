@@ -34,8 +34,15 @@
 
 <main>
   <!-- TAB 1: MAPA I UNOS -->
-  <div id="map-view" class="tab-content active">
+  <div id="map-view" class="tab-content active" style="position: relative;">
     <div id="map"></div>
+    
+    <!-- LEBDEĆI ALATI NA MAPI (Zasebno od headera, idealno za mobilne uređaje) -->
+    <div class="map-floating-tools">
+      <button type="button" id="toggleMeasureBtn" class="map-tool-btn" title="Mjeri distancu/površinu">
+        📏 Mjeri
+      </button>
+    </div>
     
     <div id="sidebar-add">
       <button type="button" id="gpsBtn" class="btn btn-gps">

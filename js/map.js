@@ -5,6 +5,10 @@ import { getLocations } from './db.js';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 
+// Uvoz geokodera i njegovih stilova
+import 'leaflet-control-geocoder';
+import 'leaflet-control-geocoder/dist/Control.Geocoder.css';
+
 const DefaultIcon = L.icon({
   iconUrl: markerIcon,
   shadowUrl: markerShadow,
@@ -47,6 +51,11 @@ export function initMap(onMapClickCallback) {
     zoom: 7,
     layers: [streetTiles]
   });
+
+  L.Control.geocoder({
+  defaultMarkGeocode: true,
+  placeholder: "Pretraži lokaciju ili adresu..."
+}).addTo(map);
 
   // 🎛️ Kreiranje custom Toggle dugmeta
   addMapToggleControl();

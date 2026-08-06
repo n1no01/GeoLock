@@ -324,3 +324,28 @@ main {
 .toast-notification.success {
   background: #16a34a;
 }
+
+.map-floating-tools {
+  position: absolute;
+  top: 10px;
+  left: 60px; /* Pomjereno od zoom kontrola */
+  z-index: 1000;
+  display: flex;
+  gap: 6px;
+}
+
+.map-tool-btn {
+  background: white;
+  border: 2px solid rgba(0,0,0,0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  color: #1e293b;
+}
+
+.map-tool-btn:active {
+  background: #f1f5f9;
+}
