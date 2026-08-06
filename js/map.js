@@ -32,7 +32,7 @@ export function initMap(onMapClickCallback) {
     attribution: '© OpenStreetMap'
   });
 
-  // 🛰️ Satelitski sloj (Esri World Imagery)
+  // 🛰️ Satelitski sloj (Esri World Imagery) - provjereni endpoint koji je radio
   satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 18,
     minZoom: 1,
@@ -62,7 +62,7 @@ export function initMap(onMapClickCallback) {
   updateMapMarkers();
 }
 
-// 🔘 Leaflet Toggle dugme
+// 🔘 Sigurni Toggle sistem za prebacivanje slojeva
 function addMapToggleControl() {
   const ToggleControl = L.Control.extend({
     options: { position: 'topright' },
@@ -81,19 +81,19 @@ function addMapToggleControl() {
         L.DomEvent.preventDefault(e);
 
         if (isSatellite) {
-          map.removeLayer(satelliteTiles);
-          map.addLayer(streetTiles);
+          if (map.hasLayer(satelliteTiles)) map.removeLayer(satelliteTiles);
+          if (!map.hasLayer(streetTiles)) map.addLayer(streetTiles);
           isSatellite = false;
         } else {
-          map.removeLayer(streetTiles);
-          map.addLayer(satelliteTiles);
+          if (map.hasLayer(streetTiles)) map.removeLayer(streetTiles);
+          if (!map.hasLayer(satelliteTiles)) map.addLayer(satelliteTiles);
           isSatellite = true;
         }
 
-        // 💡 Forsira ponovno renderovanje pločica i veličine da se izbjegne siva/prazna mapa
+        // Forsira ponovno iscrtavanje pločica
         setTimeout(() => {
           map.invalidateSize();
-        }, 50);
+        }, 100);
       });
 
       return container;
