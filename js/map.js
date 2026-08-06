@@ -1,3 +1,5 @@
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { getLocations } from './db.js';
 
 let map = null;
@@ -19,6 +21,7 @@ export function initMap(onMapClickCallback) {
   // 🛰️ Satelitski sloj (Esri World Imagery)
   satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 18,
+    minZoom: 1,
     attribution: 'Tiles © Esri'
   });
 
@@ -29,7 +32,7 @@ export function initMap(onMapClickCallback) {
     layers: [streetTiles]
   });
 
-  // 🎛️ Kreiranje custom Toggle dugmeta identičnog izgleda kao standardna Leaflet kontrola slojeva
+  // 🎛️ Kreiranje custom Toggle dugmeta
   addMapToggleControl();
 
   markersGroup = L.layerGroup().addTo(map);
@@ -45,7 +48,7 @@ export function initMap(onMapClickCallback) {
   updateMapMarkers();
 }
 
-// 🔘 Leaflet Toggle dugme identičnog izgleda kao fabričko `L.control.layers`
+// 🔘 Leaflet Toggle dugme
 function addMapToggleControl() {
   const ToggleControl = L.Control.extend({
     options: { position: 'topright' },
@@ -57,7 +60,6 @@ function addMapToggleControl() {
       link.href = '#';
       link.title = 'Prebaci sloj mape';
 
-      // Onemogućava da klik na dugme postavi marker na mapu ispod
       L.DomEvent.disableClickPropagation(container);
       L.DomEvent.disableScrollPropagation(container);
 
@@ -73,6 +75,11 @@ function addMapToggleControl() {
           map.addLayer(satelliteTiles);
           isSatellite = true;
         }
+
+        // 💡 Forsira ponovno renderovanje pločica i veličine da se izbjegne siva/prazna mapa
+        setTimeout(() => {
+          map.invalidateSize();
+        }, 50);
       });
 
       return container;
@@ -92,7 +99,6 @@ export async function updateMapMarkers() {
     const lat = parseFloat(loc.lat);
     const lng = parseFloat(loc.lng);
 
-    // 🛡️ Sigurnosna provjera validnosti koordinata
     if (!isNaN(lat) && !isNaN(lng) && lat !== null && lng !== null) {
       const marker = L.marker([lat, lng]);
       marker.bindPopup(`
@@ -131,7 +137,6 @@ export function previewLocation(lat, lng) {
   map.panTo([parsedLat, parsedLng]);
 }
 
-// 📍 Prikaz kruga preciznosti za GPS lokaciju
 export function addGpsCircle(lat, lng, accuracy) {
   if (!map) return;
 
