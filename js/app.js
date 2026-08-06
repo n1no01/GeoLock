@@ -18,8 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   setupEventListeners();
-  updateCounts();
-  registerServiceWorker();
+  await updateCounts();
 
   await checkAuthStatus();
 
@@ -72,7 +71,7 @@ function setupEventListeners() {
   document.getElementById('searchInput').addEventListener('input', renderListView);
   document.getElementById('sortSelect').addEventListener('change', renderListView);
 
-  // DUGME ZA BIOMETRIJU U HEADERU (NAKNADNO DODAVANJE)
+  // DUGME ZA BIOMETRIJU U HEADERU
   const enableBioHeaderBtn = document.getElementById('enableBioHeaderBtn');
   if (enableBioHeaderBtn) {
     enableBioHeaderBtn.addEventListener('click', async () => {
@@ -134,7 +133,6 @@ function setupEventListeners() {
       const password = document.getElementById('authPassword').value;
       const rememberMe = document.getElementById('rememberMe') ? document.getElementById('rememberMe').checked : true;
 
-      // 🔐 Automatsko izvođenje identičnog AES ključa iz Emaila i Lozinke
       deriveKeyFromCredentials(email, password);
 
       try {
@@ -142,7 +140,6 @@ function setupEventListeners() {
           await signUpUser(email, password);
           showToast('Registracija uspješna! Provjerite email za potvrdu.', 'success');
         } else {
-          // Proslijeđujemo rememberMe opciju u Supabase poziv
           await signInUser(email, password, rememberMe);
           showToast('Prijavljeni ste!', 'success');
 
@@ -155,8 +152,8 @@ function setupEventListeners() {
           }
 
           await syncLocationsWithCloud();
-          updateMapMarkers();
-          renderListView();
+          await updateMapMarkers();
+          await renderListView();
         }
         document.getElementById('authModal').classList.remove('open');
         await checkAuthStatus();
@@ -179,7 +176,7 @@ async function checkAuthStatus() {
     const mainContent = document.querySelector('main');
 
     if (user) {
-      // Korisnik JESTE prijavljen: Odključaj interfejs
+      // Korisnik JESTE prijavljen: Otključaj interfejs
       if (authModal) authModal.classList.remove('open');
       if (mainContent) {
         mainContent.style.pointerEvents = 'auto';
@@ -187,17 +184,16 @@ async function checkAuthStatus() {
       }
 
       if (authBtn) authBtn.innerText = 'Odjava (' + user.email.split('@')[0] + ')';
-      if (syncStatus) syncStatus.innerText = '☁️ Povezano';
+      if (syncStatus) syncStatus.innerText = navigator.onLine ? '☁️ Povezano' : '🔒 Offline rad';
 
-      // Prikaz biometrijskog dugmeta/statusa u headeru
       const bioAvailable = await isBiometricsAvailable();
       const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
 
       if (bioAvailable && bioHeaderContainer) {
         bioHeaderContainer.style.display = 'block';
         if (isBioEnabled) {
-          enableBioHeaderBtn.remove();
-        } else {
+          if (enableBioHeaderBtn) enableBioHeaderBtn.style.display = 'none';
+        } else if (enableBioHeaderBtn) {
           enableBioHeaderBtn.innerText = '👆 Omogući Biometriju';
           enableBioHeaderBtn.style.background = '#334155';
           enableBioHeaderBtn.disabled = false;
@@ -205,12 +201,12 @@ async function checkAuthStatus() {
       } else if (bioHeaderContainer) {
         bioHeaderContainer.style.display = 'none';
       }
-      
+
       await syncLocationsWithCloud();
-      updateMapMarkers();
-      renderListView();
+      await updateMapMarkers();
+      await renderListView();
     } else {
-      // Korisnik NIJE prijavljen: Zaključaj interfejs
+      // Korisnik NIJE prijavljen
       if (authBtn) authBtn.innerText = 'Prijava';
       if (syncStatus) syncStatus.innerText = '🔒 Prijava obavezna';
       if (bioHeaderContainer) bioHeaderContainer.style.display = 'none';
@@ -218,28 +214,28 @@ async function checkAuthStatus() {
       const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
       const bioContainer = document.getElementById('bioFastLoginContainer');
       if (bioContainer) bioContainer.style.display = isBioEnabled ? 'block' : 'none';
-      
+
       if (authModal) authModal.classList.add('open');
 
       if (mainContent) {
         mainContent.style.pointerEvents = 'none';
         mainContent.style.filter = 'blur(4px)';
       }
-      
-      updateMapMarkers();
-      renderListView();
+
+      await updateMapMarkers();
+      await renderListView();
     }
   } catch (err) {
-    console.warn("Supabase auth nije konfigurisan ili nema mreže:", err);
+    console.warn("Auth provjera:", err);
   }
 }
 
 function switchTab(tabId) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-  
+
   document.getElementById(tabId).classList.add('active');
-  
+
   if (tabId === 'map-view') {
     document.getElementById('tabMapBtn').classList.add('active');
     invalidateMapSize();
@@ -252,7 +248,6 @@ function switchTab(tabId) {
 async function handleAddFormSubmit(e) {
   e.preventDefault();
 
-  // 🔒 Sigurnosna provjera: Prekini ako korisnik nije prijavljen
   const user = await getCurrentUser();
   if (!user) {
     showToast('Morate biti prijavljeni da biste sačuvali lokaciju!', 'error');
@@ -269,35 +264,37 @@ async function handleAddFormSubmit(e) {
   const imagePromises = Array.from(files).map(file => compressImage(file));
   const images = await Promise.all(imagePromises);
 
-  saveLocation({ 
-    id: Date.now().toString(), 
-    lat, lng, title, description, 
+  // AWAIT za spremanje u IndexedDB
+  await saveLocation({
+    id: Date.now().toString(),
+    lat, lng, title, description,
     audio: getCurrentAudio(),
-    images, 
+    images,
     synced: false,
-    timestamp: new Date().toISOString() 
+    timestamp: new Date().toISOString()
   });
 
   resetAudioState();
-  updateMapMarkers();
   document.getElementById('locationForm').reset();
   document.getElementById('gpsStatus').innerText = '';
-  updateCounts();
-  showToast('Lokacija sačuvana!', 'success');
+  await updateCounts();
+  showToast('Lokacija sačuvana lokalno!', 'success');
 
   await syncLocationsWithCloud();
-  updateMapMarkers();
-  renderListView();
+  await updateMapMarkers();
+  await renderListView();
 }
 
-function renderListView() {
+async function renderListView() {
   const grid = document.getElementById('gridContainer');
   if (!grid) return;
-  
+
   grid.innerHTML = '';
   const search = document.getElementById('searchInput').value.toLowerCase();
   const sortBy = document.getElementById('sortSelect').value;
-  const locations = getLocations();
+
+  // AWAIT za dohvaćanje iz IndexedDB
+  const locations = await getLocations();
 
   let filtered = locations.filter(l => (l.title || '').toLowerCase().includes(search) || (l.description || '').toLowerCase().includes(search));
   filtered.sort((a, b) => {
@@ -310,7 +307,7 @@ function renderListView() {
     const card = document.createElement('div');
     card.className = 'card';
     card.addEventListener('click', () => openModal(loc.id));
-    
+
     const hasImg = loc.images && loc.images.length > 0;
     const isSynced = loc.synced;
 
@@ -333,18 +330,18 @@ function renderListView() {
     `;
     grid.appendChild(card);
   });
-  updateCounts();
+  await updateCounts();
 }
 
-function openModal(id) {
-  const locations = getLocations();
-  const loc = locations.find(l => String(l.id) === String(id)); 
+async function openModal(id) {
+  const locations = await getLocations();
+  const loc = locations.find(l => String(l.id) === String(id));
   if (!loc) return;
 
   document.getElementById('modalTitle').innerText = loc.title;
   document.getElementById('modalCoords').innerText = `Koordinate: ${loc.lat}, ${loc.lng}`;
   document.getElementById('modalDesc').innerText = loc.description || 'Nema pisanog opisa.';
-  
+
   const audioContainer = document.getElementById('modalAudioContainer');
   const audioPlayer = document.getElementById('modalAudioPlayer');
   if (loc.audio) {
@@ -355,12 +352,12 @@ function openModal(id) {
     audioContainer.style.display = 'none';
   }
 
-  const gallery = document.getElementById('modalGallery'); 
+  const gallery = document.getElementById('modalGallery');
   gallery.innerHTML = '';
   if (loc.images && loc.images.length > 0) {
     document.getElementById('modalImageCount').innerText = loc.images.length;
     loc.images.forEach(img => {
-      const item = document.createElement('div'); 
+      const item = document.createElement('div');
       item.className = 'gallery-item';
       item.innerHTML = `<img src="${img}">`;
       item.querySelector('img').addEventListener('click', () => openImageFull(img));
@@ -373,21 +370,21 @@ function openModal(id) {
 
   document.getElementById('modalEditBtn').onclick = () => { closeModal('detailsModal'); openEditModal(loc.id); };
   document.getElementById('modalMapBtn').onclick = () => { closeModal('detailsModal'); switchTab('map-view'); centerMap(loc.lat, loc.lng); };
-  document.getElementById('modalDeleteBtn').onclick = async () => { 
-    if (confirm('Obrišite lokaciju?')) { 
-      await deleteLocationFromDb(loc.id); 
-      updateMapMarkers(); 
-      renderListView(); 
-      closeModal('detailsModal'); 
-    } 
+  document.getElementById('modalDeleteBtn').onclick = async () => {
+    if (confirm('Obrišite lokaciju?')) {
+      await deleteLocationFromDb(loc.id);
+      await updateMapMarkers();
+      await renderListView();
+      closeModal('detailsModal');
+    }
   };
 
   document.getElementById('detailsModal').classList.add('open');
 }
 
-function openEditModal(id) {
-  const locations = getLocations();
-  const loc = locations.find(l => String(l.id) === String(id)); 
+async function openEditModal(id) {
+  const locations = await getLocations();
+  const loc = locations.find(l => String(l.id) === String(id));
   if (!loc) return;
 
   document.getElementById('editId').value = loc.id;
@@ -401,11 +398,12 @@ function openEditModal(id) {
 }
 
 function renderEditGallery() {
-  const gallery = document.getElementById('editExistingGallery'); 
+  const gallery = document.getElementById('editExistingGallery');
   if (!gallery) return;
   gallery.innerHTML = '';
   currentEditingImages.forEach((img, index) => {
-    const item = document.createElement('div'); item.className = 'gallery-item';
+    const item = document.createElement('div'); 
+    item.className = 'gallery-item';
     item.innerHTML = `<img src="${img}"><button type="button" class="delete-img-btn">&times;</button>`;
     item.querySelector('.delete-img-btn').addEventListener('click', () => {
       currentEditingImages.splice(index, 1);
@@ -426,36 +424,33 @@ async function handleEditFormSubmit(e) {
 
   const newImages = await Promise.all(Array.from(files).map(file => compressImage(file)));
 
-  updateLocation(id, { lat, lng, title, description, images: [...currentEditingImages, ...newImages], synced: false });
-  updateMapMarkers(); 
-  renderListView(); 
-  closeModal('editModal'); 
-  openModal(id);
+  await updateLocation(id, { lat, lng, title, description, images: [...currentEditingImages, ...newImages], synced: false });
+  await updateMapMarkers();
+  await renderListView();
+  closeModal('editModal');
+  await openModal(id);
 
   await syncLocationsWithCloud();
-  updateMapMarkers();
-  renderListView();
+  await updateMapMarkers();
+  await renderListView();
 }
 
-function closeModal(id) { 
-  document.getElementById(id).classList.remove('open'); 
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
   if (id === 'detailsModal') {
     document.getElementById('modalAudioPlayer').pause();
   }
 }
 
-function openImageFull(src) { 
-  window.open("").document.write(`<body style="margin:0;background:#000;display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${src}" style="max-width:100%;max-height:100vh;"></body>`); 
+function openImageFull(src) {
+  window.open("").document.write(`<body style="margin:0;background:#000;display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${src}" style="max-width:100%;max-height:100vh;"></body>`);
 }
 
-function updateCounts() { 
+async function updateCounts() {
   const el = document.getElementById('tab-count');
-  if (el) el.innerText = getLocations().length; 
-}
-
-function registerServiceWorker() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  if (el) {
+    const locations = await getLocations();
+    el.innerText = locations.length;
   }
 }
 
@@ -493,7 +488,6 @@ function showToast(message, type = 'info', duration = 2500) {
   const toast = document.getElementById('toastNotification');
   if (!toast) return;
 
-  // Ikona u zavisnosti od tipa
   const icons = {
     info: 'ℹ️',
     success: '✅',

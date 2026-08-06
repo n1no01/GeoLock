@@ -1,63 +1,134 @@
 import { supabase, getCurrentUser } from './supabase.js';
 import { decryptText, decryptMediaFromUrl } from './crypto.js';
 
-const DB_KEY = 'saved_locations';
+const DB_NAME = 'GeoLockDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'locations';
 
-export function getLocations() {
-  return JSON.parse(localStorage.getItem(DB_KEY) || '[]');
+// Inicijalizacija IndexedDB baze na telefonu
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
 }
 
-export function saveLocation(location) {
-  const locations = getLocations();
-  location.synced = location.synced || false; 
-  locations.push(location);
-  localStorage.setItem(DB_KEY, JSON.stringify(locations));
-  return locations;
-}
+// 1. Dovedi sve lokacije iz IndexedDB
+export async function getLocations() {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.getAll();
 
-export function updateLocation(id, updatedData) {
-  let locations = getLocations();
-  const index = locations.findIndex(l => String(l.id) === String(id));
-  if (index !== -1) {
-    locations[index] = { ...locations[index], ...updatedData };
-    localStorage.setItem(DB_KEY, JSON.stringify(locations));
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (e) {
+    console.error("Greška pri čitanju iz IndexedDB:", e);
+    return [];
   }
-  return locations;
 }
 
+// 2. Sačuvaj novu lokaciju
+export async function saveLocation(location) {
+  location.synced = location.synced || false;
+  location.id = String(location.id);
+
+  try {
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.put(location);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch (e) {
+    console.error("Greška pri spremanju lokacije u IndexedDB:", e);
+  }
+
+  return await getLocations();
+}
+
+// 3. Ažuriraj postojeću lokaciju
+export async function updateLocation(id, updatedData) {
+  try {
+    const db = await openDB();
+    const locations = await getLocations();
+    const existing = locations.find(l => String(l.id) === String(id));
+
+    if (existing) {
+      const updated = { ...existing, ...updatedData, id: String(id) };
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE_NAME, 'readwrite');
+        const store = transaction.objectStore(STORE_NAME);
+        const request = store.put(updated);
+
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    }
+  } catch (e) {
+    console.error("Greška pri ažuriranju u IndexedDB:", e);
+  }
+
+  return await getLocations();
+}
+
+// 4. Obriši lokaciju (lokalno + cloud ako ima mreže)
 export async function deleteLocationFromDb(id) {
-  let locations = getLocations();
-  locations = locations.filter(l => String(l.id) !== String(id));
-  localStorage.setItem(DB_KEY, JSON.stringify(locations));
+  const stringId = String(id);
+
+  try {
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(stringId);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch (e) {
+    console.error("Greška pri brisanju iz IndexedDB:", e);
+  }
 
   if (navigator.onLine) {
     try {
       const user = await getCurrentUser();
       if (user) {
-        const { error } = await supabase
+        await supabase
           .from('locations')
           .delete()
-          .eq('id', id)
+          .eq('id', stringId)
           .eq('user_id', user.id);
-
-        if (error) {
-          console.error("Greška pri brisanju sa Supabase clouda:", error);
-        } else {
-          console.log(`Lokacija ${id} uspješno uklonjena iz Supabase baze.`);
-        }
       }
     } catch (err) {
-      console.error("Greška pri komunikaciji sa bazom tokom brisanja:", err);
+      console.warn("Brisanje sa clouda preskočeno zbog mreže:", err.message);
     }
   }
 
-  return locations;
+  return await getLocations();
 }
 
+// 5. Sinhronizuj lokacije sa clouda u IndexedDB
 export async function mergeLocations(cloudLocations) {
-  const localLocations = getLocations();
+  const localLocations = await getLocations();
   const map = new Map();
 
+  // Prvo postavi sve lokalne neposlate izmjene
   localLocations.forEach(loc => map.set(String(loc.id), loc));
 
   for (const cloudLoc of cloudLocations) {
@@ -70,17 +141,24 @@ export async function mergeLocations(cloudLocations) {
     if (isNaN(parsedLat)) parsedLat = parseFloat(cloudLoc.lat);
     if (isNaN(parsedLng)) parsedLng = parseFloat(cloudLoc.lng);
 
-    const decryptedImages = [];
+    let decryptedImages = [];
     if (cloudLoc.images_urls && cloudLoc.images_urls.length > 0) {
-      for (const imgUrl of cloudLoc.images_urls) {
-        const decImg = await decryptMediaFromUrl(imgUrl);
-        decryptedImages.push(decImg);
+      try {
+        decryptedImages = await Promise.all(
+          cloudLoc.images_urls.map(imgUrl => decryptMediaFromUrl(imgUrl))
+        );
+      } catch (err) {
+        console.error("Greška pri dekripciji slika sa clouda:", err);
       }
     }
 
     let decryptedAudio = null;
     if (cloudLoc.audio_url) {
-      decryptedAudio = await decryptMediaFromUrl(cloudLoc.audio_url);
+      try {
+        decryptedAudio = await decryptMediaFromUrl(cloudLoc.audio_url);
+      } catch (err) {
+        console.error("Greška pri dekripciji zvuka sa clouda:", err);
+      }
     }
 
     map.set(String(cloudLoc.id), {
@@ -97,6 +175,19 @@ export async function mergeLocations(cloudLocations) {
   }
 
   const merged = Array.from(map.values());
-  localStorage.setItem(DB_KEY, JSON.stringify(merged));
+
+  // Sačuvaj sve u IndexedDB
+  try {
+    const db = await openDB();
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    
+    // Očisti stare unose i upiši spojene
+    store.clear();
+    merged.forEach(item => store.put(item));
+  } catch (e) {
+    console.error("Greška pri spremanju spojenih lokacija u IndexedDB:", e);
+  }
+
   return merged;
 }
