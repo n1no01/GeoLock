@@ -82,11 +82,11 @@ function addMapToggleControl() {
   map.addControl(new ToggleControl());
 }
 
-export function updateMapMarkers() {
+export async function updateMapMarkers() {
   if (!map || !markersGroup) return;
 
   markersGroup.clearLayers();
-  const locations = getLocations();
+  const locations = await getLocations();
 
   locations.forEach(loc => {
     const lat = parseFloat(loc.lat);
