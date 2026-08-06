@@ -5,15 +5,19 @@ let markersGroup = null;
 let previewMarker = null;
 let gpsCircle = null;
 
+let streetTiles = null;
+let satelliteTiles = null;
+let isSatellite = false;
+
 export function initMap(onMapClickCallback) {
   // 🗺️ Standardni sloj (OpenStreetMap)
-  const streetTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  streetTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap'
   });
 
   // 🛰️ Satelitski sloj (Esri World Imagery)
-  const satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 18,
     attribution: 'Tiles © Esri'
   });
@@ -25,12 +29,8 @@ export function initMap(onMapClickCallback) {
     layers: [streetTiles]
   });
 
-  // 🎛️ Kontrola za prebacivanje slojeva (gornji desni ugao)
-  const baseMaps = {
-    "Standardna": streetTiles,
-    "Satelitska": satelliteTiles
-  };
-  L.control.layers(baseMaps).addTo(map);
+  // 🎛️ Kreiranje custom Toggle dugmeta identičnog izgleda kao standardna Leaflet kontrola slojeva
+  addMapToggleControl();
 
   markersGroup = L.layerGroup().addTo(map);
 
@@ -43,6 +43,43 @@ export function initMap(onMapClickCallback) {
   });
 
   updateMapMarkers();
+}
+
+// 🔘 Leaflet Toggle dugme identičnog izgleda kao fabričko `L.control.layers`
+function addMapToggleControl() {
+  const ToggleControl = L.Control.extend({
+    options: { position: 'topright' },
+
+    onAdd: function () {
+      const container = L.DomUtil.create('div', 'leaflet-control-layers leaflet-bar');
+      const link = L.DomUtil.create('a', 'leaflet-control-layers-toggle', container);
+      
+      link.href = '#';
+      link.title = 'Prebaci sloj mape';
+
+      // Onemogućava da klik na dugme postavi marker na mapu ispod
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+
+      L.DomEvent.on(link, 'click', (e) => {
+        L.DomEvent.preventDefault(e);
+
+        if (isSatellite) {
+          map.removeLayer(satelliteTiles);
+          map.addLayer(streetTiles);
+          isSatellite = false;
+        } else {
+          map.removeLayer(streetTiles);
+          map.addLayer(satelliteTiles);
+          isSatellite = true;
+        }
+      });
+
+      return container;
+    }
+  });
+
+  map.addControl(new ToggleControl());
 }
 
 export function updateMapMarkers() {

@@ -78,7 +78,7 @@ function setupEventListeners() {
     enableBioHeaderBtn.addEventListener('click', async () => {
       const bioAvailable = await isBiometricsAvailable();
       if (!bioAvailable) {
-        alert("Vaš uređaj ne podržava biometrijsku autentifikaciju.");
+        showToast("Vaš uređaj ne podržava biometrijsku autentifikaciju.", "error");
         return;
       }
       const success = await registerBiometrics();
@@ -88,7 +88,7 @@ function setupEventListeners() {
     });
   }
 
-  // BRZA BIOMETRIJSKA PRIJAVNO DUGME U MODALU
+  // BRZA BIOMETRIJSKA PRIJAVA U MODALU
   const bioBtn = document.getElementById('biometricsBtn');
   if (bioBtn) {
     bioBtn.addEventListener('click', async () => {
@@ -110,11 +110,7 @@ function setupEventListeners() {
           await checkAuthStatus();
         }
       } else {
-        const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
-        const bioContainer = document.getElementById('bioFastLoginContainer');
-        if (bioContainer) bioContainer.style.display = isBioEnabled ? 'block' : 'none';
-
-        document.getElementById('authModal').classList.add('open');
+        await checkAuthStatus();
       }
     });
   }
@@ -136,6 +132,7 @@ function setupEventListeners() {
       e.preventDefault();
       const email = document.getElementById('authEmail').value;
       const password = document.getElementById('authPassword').value;
+      const rememberMe = document.getElementById('rememberMe') ? document.getElementById('rememberMe').checked : true;
 
       // 🔐 Automatsko izvođenje identičnog AES ključa iz Emaila i Lozinke
       deriveKeyFromCredentials(email, password);
@@ -143,10 +140,11 @@ function setupEventListeners() {
       try {
         if (isSignUpMode) {
           await signUpUser(email, password);
-          alert('Registracija uspješna! Provjerite email za potvrdu.');
+          showToast('Registracija uspješna! Provjerite email za potvrdu.', 'success');
         } else {
-          await signInUser(email, password);
-          alert('Prijavljeni ste!');
+          // Proslijeđujemo rememberMe opciju u Supabase poziv
+          await signInUser(email, password, rememberMe);
+          showToast('Prijavljeni ste!', 'success');
 
           const bioAvailable = await isBiometricsAvailable();
           const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
@@ -163,7 +161,7 @@ function setupEventListeners() {
         document.getElementById('authModal').classList.remove('open');
         await checkAuthStatus();
       } catch (err) {
-        alert('Greška pri prijavi: ' + err.message);
+        showToast('Greška pri prijavi: ' + err.message, 'error');
       }
     });
   }
@@ -177,7 +175,17 @@ async function checkAuthStatus() {
     const bioHeaderContainer = document.getElementById('bioHeaderContainer');
     const enableBioHeaderBtn = document.getElementById('enableBioHeaderBtn');
 
+    const authModal = document.getElementById('authModal');
+    const mainContent = document.querySelector('main');
+
     if (user) {
+      // Korisnik JESTE prijavljen: Odključaj interfejs
+      if (authModal) authModal.classList.remove('open');
+      if (mainContent) {
+        mainContent.style.pointerEvents = 'auto';
+        mainContent.style.filter = 'none';
+      }
+
       if (authBtn) authBtn.innerText = 'Odjava (' + user.email.split('@')[0] + ')';
       if (syncStatus) syncStatus.innerText = '☁️ Povezano';
 
@@ -188,9 +196,7 @@ async function checkAuthStatus() {
       if (bioAvailable && bioHeaderContainer) {
         bioHeaderContainer.style.display = 'block';
         if (isBioEnabled) {
-          enableBioHeaderBtn.innerText = '👆 Biometrija Aktivna';
-          enableBioHeaderBtn.style.background = '#15803d'; // Zelena boja
-          enableBioHeaderBtn.disabled = true;
+          enableBioHeaderBtn.remove();
         } else {
           enableBioHeaderBtn.innerText = '👆 Omogući Biometriju';
           enableBioHeaderBtn.style.background = '#334155';
@@ -204,9 +210,22 @@ async function checkAuthStatus() {
       updateMapMarkers();
       renderListView();
     } else {
+      // Korisnik NIJE prijavljen: Zaključaj interfejs
       if (authBtn) authBtn.innerText = 'Prijava';
-      if (syncStatus) syncStatus.innerText = '🔒 Lokalni rad';
+      if (syncStatus) syncStatus.innerText = '🔒 Prijava obavezna';
       if (bioHeaderContainer) bioHeaderContainer.style.display = 'none';
+
+      const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
+      const bioContainer = document.getElementById('bioFastLoginContainer');
+      if (bioContainer) bioContainer.style.display = isBioEnabled ? 'block' : 'none';
+      
+      if (authModal) authModal.classList.add('open');
+
+      if (mainContent) {
+        mainContent.style.pointerEvents = 'none';
+        mainContent.style.filter = 'blur(4px)';
+      }
+      
       updateMapMarkers();
       renderListView();
     }
@@ -232,6 +251,15 @@ function switchTab(tabId) {
 
 async function handleAddFormSubmit(e) {
   e.preventDefault();
+
+  // 🔒 Sigurnosna provjera: Prekini ako korisnik nije prijavljen
+  const user = await getCurrentUser();
+  if (!user) {
+    showToast('Morate biti prijavljeni da biste sačuvali lokaciju!', 'error');
+    await checkAuthStatus();
+    return;
+  }
+
   const lat = parseFloat(document.getElementById('lat').value);
   const lng = parseFloat(document.getElementById('lng').value);
   const title = document.getElementById('title').value;
@@ -255,7 +283,7 @@ async function handleAddFormSubmit(e) {
   document.getElementById('locationForm').reset();
   document.getElementById('gpsStatus').innerText = '';
   updateCounts();
-  alert('Lokacija sačuvana!');
+  showToast('Lokacija sačuvana!', 'success');
 
   await syncLocationsWithCloud();
   updateMapMarkers();
@@ -459,6 +487,25 @@ function compressImage(file, maxWidth = 1600, quality = 0.7) {
       };
     };
   });
+}
+
+function showToast(message, type = 'info', duration = 2500) {
+  const toast = document.getElementById('toastNotification');
+  if (!toast) return;
+
+  // Ikona u zavisnosti od tipa
+  const icons = {
+    info: 'ℹ️',
+    success: '✅',
+    error: '⚠️'
+  };
+
+  toast.innerHTML = `<span>${icons[type] || ''}</span> <span>${message}</span>`;
+  toast.className = `toast-notification ${type} show`;
+
+  setTimeout(() => {
+    toast.classList.remove('show');
+  }, duration);
 }
 
 window.switchTab = switchTab;

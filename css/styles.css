@@ -281,3 +281,46 @@ main {
 .audio-preview { width: 100%; margin-top: 4px; }
 
 .gps-status { font-size: 11px; color: #059669; margin-top: 3px; font-weight: 600; text-align: center; }
+.leaflet-control-layers-toggle {
+  width: 44px !important;
+  height: 44px !important;
+  background-size: 26px 26px !important; /* Prilagođava veličinu ikone unutar dugmeta */
+}
+
+/* Toast Obavještenja */
+.toast-notification {
+  position: fixed;
+  top: 16px; /* Razmak od samog vrha ekrana */
+  left: 50%;
+  transform: translateX(-50%) translateY(-60px); /* Početno sakriveno iznad ekrana */
+  background: #0f172a;
+  color: #ffffff;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 999999 !important; /* Osigurava da je iznad navbara i modala */
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.toast-notification.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0); /* Spušta se na tačnu poziciju */
+}
+
+.toast-notification.error {
+  background: #dc2626;
+}
+
+.toast-notification.success {
+  background: #16a34a;
+}
