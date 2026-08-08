@@ -194,6 +194,10 @@ async function openEditModal(id) {
   document.getElementById('editLng').value = loc.lng;
   document.getElementById('editTitle').value = loc.title;
   document.getElementById('editDescription').value = loc.description || '';
+  
+  // Izračunaj i postavi MGRS pri otvaranju modala za uređivanje
+  updateEditMgrsFromLatLng();
+
   currentEditingImages = loc.images ? [...loc.images] : [];
   renderEditGallery();
   document.getElementById('editModal').classList.add('open');
@@ -225,14 +229,28 @@ async function handleEditFormSubmit(e) {
   const files = document.getElementById('editNewImages').files;
   const newImages = await Promise.all(Array.from(files).map(file => compressImage(file)));
 
-  await updateLocation(id, { lat, lng, title, description, images: [...currentEditingImages, ...newImages], synced: false });
-  await updateMapMarkers();
-  await renderListView();
-  closeModal('editModal');
-  await openModal(id);
-  await syncLocationsWithCloud();
-  await updateMapMarkers();
-  await renderListView();
+  try {
+    await updateLocation(id, { 
+      lat, 
+      lng, 
+      title, 
+      description, 
+      images: [...currentEditingImages, ...newImages], 
+      synced: false,
+      timestamp: new Date().toISOString()
+    });
+
+    closeModal('editModal');
+    showToast('Izmjena sačuvana!', 'success');
+
+    await syncLocationsWithCloud();
+    await updateMapMarkers();
+    await renderListView();
+
+  } catch (err) {
+    console.error("Greška pri izmjeni lokacije:", err);
+    showToast("Greška pri spašavanju izmjena.", "error");
+  }
 }
 
 function compressImage(file, maxWidth = 1600, quality = 0.7) {
@@ -259,7 +277,7 @@ function compressImage(file, maxWidth = 1600, quality = 0.7) {
   });
 }
 
-// MGRS konverzija u formi
+// MGRS konverzija u glavnoj formi (Dodavanje)
 const latInput = document.getElementById('lat');
 const lngInput = document.getElementById('lng');
 const mgrsInput = document.getElementById('mgrsInput');
@@ -290,6 +308,38 @@ if (latInput && lngInput && mgrsInput) {
   latInput.addEventListener('input', updateMgrsFromLatLng);
   lngInput.addEventListener('input', updateMgrsFromLatLng);
   mgrsInput.addEventListener('input', updateLatLngFromMgrs);
+}
+
+// MGRS konverzija u Edit formi (Uređivanje)
+const editLatInput = document.getElementById('editLat');
+const editLngInput = document.getElementById('editLng');
+const editMgrsInput = document.getElementById('editMgrsInput');
+
+function updateEditMgrsFromLatLng() {
+  if (!editLatInput || !editLngInput || !editMgrsInput) return;
+  const lat = parseFloat(editLatInput.value);
+  const lng = parseFloat(editLngInput.value);
+  if (!isNaN(lat) && !isNaN(lng)) {
+    try { editMgrsInput.value = mgrs.forward([lng, lat], 5); } catch (e) {}
+  }
+}
+
+function updateEditLatLngFromMgrs() {
+  if (!editLatInput || !editLngInput || !editMgrsInput) return;
+  const val = editMgrsInput.value.trim();
+  if (val.length > 5) {
+    try {
+      const lngLat = mgrs.toPoint(val);
+      editLatInput.value = lngLat[1].toFixed(6);
+      editLngInput.value = lngLat[0].toFixed(6);
+    } catch (e) {}
+  }
+}
+
+if (editLatInput && editLngInput && editMgrsInput) {
+  editLatInput.addEventListener('input', updateEditMgrsFromLatLng);
+  editLngInput.addEventListener('input', updateEditMgrsFromLatLng);
+  editMgrsInput.addEventListener('input', updateEditLatLngFromMgrs);
 }
 
 // Globalne funkcije za HTML dugmad (onclick)

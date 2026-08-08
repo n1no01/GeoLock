@@ -69,76 +69,72 @@ export async function syncLocationsWithCloud() {
       return;
     }
 
-    // 1. Dvosmjerna sinhronizacija (Preuzmi nove podatke sa clouda)
-    await downloadLocationsFromCloud();
-
-    // KLJUČNA IZMJENA: Await za asinkroni IndexedDB
+    // 1. Dvosmjerna sinhronizacija - PRVO šaljemo nesinhronizovane lokalne podatke!
     const locations = await getLocations();
     const unsynced = locations.filter(l => !l.synced);
 
-    if (unsynced.length === 0) {
-      console.log("Svi lokalni podaci su već sinhronizovani.");
-      return;
-    }
+    if (unsynced.length > 0) {
+      console.log(`Započinjem Zero-Knowledge enkripciju i sinhronizaciju za ${unsynced.length} nesinhronizovanih lokacija...`);
 
-    console.log(`Započinjem Zero-Knowledge enkripciju i sinhronizaciju za ${unsynced.length} nesinhronizovanih lokacija...`);
+      for (const loc of unsynced) {
+        try {
+          // 2. Upload enkriptovanih slika (Paralelno)
+          let imageUrls = [];
+          if (loc.images && loc.images.length > 0) {
+            imageUrls = await Promise.all(
+              loc.images.map((img, i) => 
+                uploadEncryptedFile(img, 'location-images', `${user.id}/${loc.id}_img_${i}`)
+              )
+            );
+          }
 
-    for (const loc of unsynced) {
-      try {
-        // 2. Upload enkriptovanih slika (Paralelno)
-        let imageUrls = [];
-        if (loc.images && loc.images.length > 0) {
-          imageUrls = await Promise.all(
-            loc.images.map((img, i) => 
-              uploadEncryptedFile(img, 'location-images', `${user.id}/${loc.id}_img_${i}`)
-            )
-          );
+          // 3. Upload enkriptovanog zvuka
+          let audioUrl = null;
+          if (loc.audio) {
+            audioUrl = await uploadEncryptedFile(loc.audio, 'location-audio', `${user.id}/${loc.id}_audio`);
+          }
+
+          // 4. Enkripcija svih tekstualnih polja i koordinata
+          const encryptedLat = encryptText(loc.lat);
+          const encryptedLng = encryptText(loc.lng);
+          const encryptedTitle = encryptText(loc.title);
+          const encryptedDescription = encryptText(loc.description);
+
+          // 5. Upsert u PostgreSQL bazu
+          const { error: dbError } = await supabase.from('locations').upsert({
+            id: String(loc.id),
+            user_id: user.id,
+            lat: encryptedLat,
+            lng: encryptedLng,
+            title: encryptedTitle,
+            description: encryptedDescription,
+            audio_url: audioUrl,
+            images_urls: imageUrls,
+            timestamp: loc.timestamp || new Date().toISOString()
+          });
+
+          if (dbError) {
+            console.error("Greška pri unosu u PostgreSQL tabelu:", dbError);
+            throw new Error("Baza greška: " + dbError.message);
+          }
+
+          // 6. Označi lokalno da je sačuvano u IndexedDB
+          await updateLocation(loc.id, { 
+            synced: true
+          });
+
+          console.log(`Lokacija "${loc.title}" kompletno enkriptovana i sinhronizovana!`);
+
+        } catch (err) {
+          console.error(`Greška pri sinhronizaciji lokacije ${loc.id}:`, err);
+          break; 
         }
-
-        // 3. Upload enkriptovanog zvuka
-        let audioUrl = null;
-        if (loc.audio) {
-          audioUrl = await uploadEncryptedFile(loc.audio, 'location-audio', `${user.id}/${loc.id}_audio`);
-        }
-
-        // 4. Enkripcija svih tekstualnih polja i koordinata
-        const encryptedLat = encryptText(loc.lat);
-        const encryptedLng = encryptText(loc.lng);
-        const encryptedTitle = encryptText(loc.title);
-        const encryptedDescription = encryptText(loc.description);
-
-        // 5. Upsert u PostgreSQL bazu
-        const { error: dbError } = await supabase.from('locations').upsert({
-          id: String(loc.id),
-          user_id: user.id,
-          lat: encryptedLat,
-          lng: encryptedLng,
-          title: encryptedTitle,
-          description: encryptedDescription,
-          audio_url: audioUrl,
-          images_urls: imageUrls,
-          timestamp: loc.timestamp
-        });
-
-        if (dbError) {
-          console.error("Greška pri unosu u PostgreSQL tabelu:", dbError);
-          throw new Error("Baza greška: " + dbError.message);
-        }
-
-        // 6. Označi lokalno da je sačuvano u IndexedDB (sa await)
-        await updateLocation(loc.id, { 
-          synced: true, 
-          images: imageUrls, 
-          audio: audioUrl 
-        });
-
-        console.log(`Lokacija "${loc.title}" kompletno enkriptovana i sinhronizovana!`);
-
-      } catch (err) {
-        console.error(`Greška pri sinhronizaciji lokacije ${loc.id}:`, err);
-        break; 
       }
     }
+
+    // 2. Tek pošto smo poslali lokalne izmjene na cloud, preuzimamo osveženo stanje sa clouda
+    await downloadLocationsFromCloud();
+
   } catch (globalErr) {
     console.error("Neočekivana greška u syncLocationsWithCloud:", globalErr);
   }

@@ -70,7 +70,13 @@ export async function updateLocation(id, updatedData) {
     const existing = locations.find(l => String(l.id) === String(id));
 
     if (existing) {
-      const updated = { ...existing, ...updatedData, id: String(id) };
+      const updated = { 
+        ...existing, 
+        ...updatedData, 
+        id: String(id),
+        synced: updatedData.synced !== undefined ? updatedData.synced : false 
+      };
+
       await new Promise((resolve, reject) => {
         const transaction = db.transaction(STORE_NAME, 'readwrite');
         const store = transaction.objectStore(STORE_NAME);
@@ -128,10 +134,18 @@ export async function mergeLocations(cloudLocations) {
   const localLocations = await getLocations();
   const map = new Map();
 
-  // Prvo postavi sve lokalne neposlate izmjene
+  // Prvo postavi sve lokalne neposlate izmjene u Mapu
   localLocations.forEach(loc => map.set(String(loc.id), loc));
 
   for (const cloudLoc of cloudLocations) {
+    const locId = String(cloudLoc.id);
+    const localItem = map.get(locId);
+
+    // Ako imamo lokalnu izmjenu koja NIJE sinhronizovana, ne prebrisujemo je sa starim podacima sa clouda
+    if (localItem && localItem.synced === false) {
+      continue;
+    }
+
     const decLatRaw = decryptText(cloudLoc.lat);
     const decLngRaw = decryptText(cloudLoc.lng);
 
@@ -161,8 +175,8 @@ export async function mergeLocations(cloudLocations) {
       }
     }
 
-    map.set(String(cloudLoc.id), {
-      id: String(cloudLoc.id),
+    map.set(locId, {
+      id: locId,
       lat: isNaN(parsedLat) ? 0 : parsedLat,
       lng: isNaN(parsedLng) ? 0 : parsedLng,
       title: decryptText(cloudLoc.title) || 'Neoznačeno',
