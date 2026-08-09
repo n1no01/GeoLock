@@ -1,4 +1,5 @@
 import { getLocations } from './db.js';
+import * as mgrs from 'mgrs';
 
 function downloadFile(content, fileName, contentType) {
   const a = document.createElement("a"); 
@@ -6,6 +7,20 @@ function downloadFile(content, fileName, contentType) {
   a.href = URL.createObjectURL(file); 
   a.download = fileName; 
   a.click();
+}
+
+// Pomoćna funkcija za sigurno izračunavanje MGRS-a
+function getMGRS(latRaw, lngRaw) {
+  try {
+    const lat = parseFloat(latRaw);
+    const lng = parseFloat(lngRaw);
+    if (!isNaN(lat) && !isNaN(lng)) {
+      return mgrs.forward([lng, lat], 5);
+    }
+  } catch (e) {
+    console.warn("Greška pri konverziji u MGRS:", e);
+  }
+  return "N/A";
 }
 
 export async function exportGeoJSON() {
@@ -16,7 +31,11 @@ export async function exportGeoJSON() {
       features: locations.map(l => ({ 
         type: "Feature", 
         geometry: { type: "Point", coordinates: [l.lng, l.lat] }, 
-        properties: { title: l.title, description: l.description } 
+        properties: { 
+          title: l.title, 
+          description: l.description,
+          mgrs: getMGRS(l.lat, l.lng)
+        } 
       })) 
     };
     downloadFile(JSON.stringify(geojson, null, 2), "lokacije.geojson", "application/json");
@@ -28,9 +47,10 @@ export async function exportGeoJSON() {
 export async function exportCSV() {
   try {
     const locations = await getLocations();
-    let csv = "ID,Naziv,Sirina,Duzina,Opis,Slika,ImAudio\n";
+    let csv = "ID,Naziv,Sirina,Duzina,MGRS,Opis,Slika,Dokumenti,ImAudio\n";
     locations.forEach(l => { 
-      csv += `${l.id},"${l.title}",${l.lat},${l.lng},"${(l.description||'').replace(/"/g,'""')}",${l.images?l.images.length:0},${l.audio?'DA':'NE'}\n`; 
+      const mgrsVal = getMGRS(l.lat, l.lng);
+      csv += `${l.id},"${l.title}",${l.lat},${l.lng},"${mgrsVal}","${(l.description||'').replace(/"/g,'""')}",${l.images?l.images.length:0},${l.documents?l.documents.length:0},${l.audio?'DA':'NE'}\n`; 
     });
     downloadFile(csv, "lokacije.csv", "text/csv;charset=utf-8;");
   } catch (err) {
@@ -51,6 +71,8 @@ export async function exportSingleLocationToDocx(locationId) {
     }
 
     const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, ImageRun, HeadingLevel, WidthType } = window.docx;
+
+    const mgrsString = getMGRS(loc.lat, loc.lng);
 
     const docChildren = [
       new Paragraph({
@@ -79,13 +101,15 @@ export async function exportSingleLocationToDocx(locationId) {
           new TableRow({
             children: [
               new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Geografska Širina (Lat)", bold: true })] })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Geografska Dužina (Lng)", bold: true })] })] })
+              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Geografska Dužina (Lng)", bold: true })] })] }),
+              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "MGRS Koordinata", bold: true })] })] })
             ]
           }),
           new TableRow({
             children: [
               new TableCell({ children: [new Paragraph(String(loc.lat))] }),
-              new TableCell({ children: [new Paragraph(String(loc.lng))] })
+              new TableCell({ children: [new Paragraph(String(loc.lng))] }),
+              new TableCell({ children: [new Paragraph(mgrsString)] })
             ]
           })
         ]
@@ -144,7 +168,7 @@ export async function exportSingleLocationToDocx(locationId) {
     });
 
     const blob = await Packer.toBlob(doc);
-    downloadFile(blob, `Izvjestaj_${loc.title.replace(/\s+/g, '_')}.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    downloadFile(blob, `Izvjestaj_${(loc.title || 'lokacija').replace(/\s+/g, '_')}.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
 
   } catch (err) {
     console.error("Greška pri generisanju DOCX fajla:", err);
