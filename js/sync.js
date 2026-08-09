@@ -1,14 +1,15 @@
 import { supabase, getCurrentUser } from './supabase.js';
-import { getLocations, updateLocation, mergeLocations } from './db.js';
+import { getLocations, updateLocation, mergeLocations, syncPendingDeletions } from './db.js';
 import { updateMapMarkers } from './map.js';
 import { encryptText, encryptMediaBase64 } from './crypto.js';
 
-// Upload enkriptovanog medijskog fajla u Storage
+// Upload enkriptovanog medijskog/dokumentacijskog fajla u Storage
 async function uploadEncryptedFile(base64Data, bucket, path) {
+  // Ako je već URL sa clouda, vrati ga bez ponovne obrade
   if (!base64Data || base64Data.startsWith('http')) return base64Data;
 
   const encryptedBlob = encryptMediaBase64(base64Data);
-  if (!encryptedBlob) throw new Error("Neuspješna enkripcija medijske datoteke.");
+  if (!encryptedBlob) throw new Error("Neuspješna enkripcija datoteke.");
 
   const filePath = `${path}_${Date.now()}.enc`;
 
@@ -69,7 +70,10 @@ export async function syncLocationsWithCloud() {
       return;
     }
 
-    // 1. Dvosmjerna sinhronizacija - PRVO šaljemo nesinhronizovane lokalne podatke!
+    // 0. PRVO obriši sa clouda sve lokacije koje su obrisane dok je uređaj bio offline!
+    await syncPendingDeletions();
+
+    // 1. Dvosmjerna sinhronizacija - Šaljemo nesinhronizovane lokalne podatke
     const locations = await getLocations();
     const unsynced = locations.filter(l => !l.synced);
 
@@ -78,7 +82,7 @@ export async function syncLocationsWithCloud() {
 
       for (const loc of unsynced) {
         try {
-          // 2. Upload enkriptovanih slika (Paralelno)
+          // 2. Upload enkriptovanih slika
           let imageUrls = [];
           if (loc.images && loc.images.length > 0) {
             imageUrls = await Promise.all(
@@ -94,13 +98,37 @@ export async function syncLocationsWithCloud() {
             audioUrl = await uploadEncryptedFile(loc.audio, 'location-audio', `${user.id}/${loc.id}_audio`);
           }
 
-          // 4. Enkripcija svih tekstualnih polja i koordinata
+          // 4. Upload enkriptovanih dokumenata (sadržaj + ENKRIPTOVANI NAZIV)
+          let docUrls = [];
+          if (loc.documents && loc.documents.length > 0) {
+            docUrls = await Promise.all(
+              loc.documents.map(async (doc, i) => {
+                const uploadedUrl = await uploadEncryptedFile(
+                  doc.data, 
+                  'location-documents', 
+                  `${user.id}/${loc.id}_doc_${i}`
+                );
+
+                // Enkriptujemo naziv samo ako je u pitanju novi/čisti tekst naziva
+                const encryptedName = doc.data.startsWith('http') 
+                  ? doc.name 
+                  : encryptText(doc.name);
+
+                return { 
+                  name: encryptedName,
+                  data: uploadedUrl 
+                };
+              })
+            );
+          }
+
+          // 5. Enkripcija svih tekstualnih polja i koordinata
           const encryptedLat = encryptText(loc.lat);
           const encryptedLng = encryptText(loc.lng);
           const encryptedTitle = encryptText(loc.title);
           const encryptedDescription = encryptText(loc.description);
 
-          // 5. Upsert u PostgreSQL bazu
+          // 6. Upsert u PostgreSQL bazu
           const { error: dbError } = await supabase.from('locations').upsert({
             id: String(loc.id),
             user_id: user.id,
@@ -110,6 +138,7 @@ export async function syncLocationsWithCloud() {
             description: encryptedDescription,
             audio_url: audioUrl,
             images_urls: imageUrls,
+            documents_data: docUrls,
             timestamp: loc.timestamp || new Date().toISOString()
           });
 
@@ -118,12 +147,12 @@ export async function syncLocationsWithCloud() {
             throw new Error("Baza greška: " + dbError.message);
           }
 
-          // 6. Označi lokalno da je sačuvano u IndexedDB
+          // 7. Označi lokalno da je sačuvano u IndexedDB
           await updateLocation(loc.id, { 
             synced: true
           });
 
-          console.log(`Lokacija "${loc.title}" kompletno enkriptovana i sinhronizovana!`);
+          console.log(`Lokacija "${loc.title}" i priloženi dokumenti kompletno enkriptovani i sinhronizovani!`);
 
         } catch (err) {
           console.error(`Greška pri sinhronizaciji lokacije ${loc.id}:`, err);
@@ -132,7 +161,7 @@ export async function syncLocationsWithCloud() {
       }
     }
 
-    // 2. Tek pošto smo poslali lokalne izmjene na cloud, preuzimamo osveženo stanje sa clouda
+    // 8. Preuzimanje osveženog stanja sa clouda
     await downloadLocationsFromCloud();
 
   } catch (globalErr) {

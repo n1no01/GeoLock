@@ -1,7 +1,7 @@
 import { initMap, updateMapMarkers, centerMap, previewLocation } from './map.js';
 import { getCurrentLocation } from './gps.js';
 import { toggleRecording, getCurrentAudio, resetAudioState } from './audio.js';
-import { exportGeoJSON, exportCSV } from './export.js';
+import { exportGeoJSON, exportCSV, exportSingleLocationToDocx } from './export.js';
 import { getCurrentUser, onAuthStateChange, signUpUser, signInUser, signOutUser } from './supabase.js';
 import { syncLocationsWithCloud } from './sync.js';
 import { saveLocation, updateLocation, getLocations } from './db.js';
@@ -13,6 +13,7 @@ import { switchTab, renderListView, openModal, closeModal, openImageFull, showTo
 import { checkAuthStatus } from './auth.js';
 
 let currentEditingImages = [];
+let currentEditingDocs = [];
 let isSignUpMode = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -150,6 +151,16 @@ function setupEventListeners() {
   }
 }
 
+// Pomoćna funkcija za pretvaranje dokumenata u Base64 objekat
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve({ name: file.name, data: reader.result, size: file.size });
+    reader.onerror = error => reject(error);
+  });
+}
+
 async function handleAddFormSubmit(e) {
   e.preventDefault();
   if (!await getCurrentUser()) {
@@ -162,22 +173,30 @@ async function handleAddFormSubmit(e) {
   const lng = parseFloat(document.getElementById('lng').value);
   const title = document.getElementById('title').value;
   const description = document.getElementById('description').value;
+  
   const files = document.getElementById('imageInput').files;
   const images = await Promise.all(Array.from(files).map(file => compressImage(file)));
+
+  // Čitanje priloženih dokumenata (PDF, Word, Excel)
+  const docInput = document.getElementById('documentInput');
+  const docFiles = docInput ? docInput.files : [];
+  const documents = await Promise.all(Array.from(docFiles).map(file => fileToBase64(file)));
 
   await saveLocation({
     id: Date.now().toString(),
     lat, lng, title, description,
     audio: getCurrentAudio(),
     images,
+    documents,
     synced: false,
     timestamp: new Date().toISOString()
   });
 
   resetAudioState();
   document.getElementById('locationForm').reset();
+  if (docInput) docInput.value = '';
   document.getElementById('gpsStatus').innerText = '';
-  showToast('Lokacija sačuvana lokalno!', 'success');
+  showToast('Lokacija i prilozi sačuvani lokalno!', 'success');
 
   await syncLocationsWithCloud();
   await updateMapMarkers();
@@ -195,11 +214,14 @@ async function openEditModal(id) {
   document.getElementById('editTitle').value = loc.title;
   document.getElementById('editDescription').value = loc.description || '';
   
-  // Izračunaj i postavi MGRS pri otvaranju modala za uređivanje
   updateEditMgrsFromLatLng();
 
   currentEditingImages = loc.images ? [...loc.images] : [];
   renderEditGallery();
+
+  currentEditingDocs = loc.documents ? [...loc.documents] : [];
+  renderEditDocs();
+
   document.getElementById('editModal').classList.add('open');
 }
 
@@ -219,6 +241,31 @@ function renderEditGallery() {
   });
 }
 
+function renderEditDocs() {
+  const docsContainer = document.getElementById('editExistingDocs');
+  if (!docsContainer) return;
+  docsContainer.innerHTML = '';
+
+  if (currentEditingDocs.length === 0) {
+    docsContainer.innerHTML = '<span style="font-size:11px; color:#94a3b8;">Nema priloženih dokumenata.</span>';
+    return;
+  }
+
+  currentEditingDocs.forEach((doc, index) => {
+    const item = document.createElement('div');
+    item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;';
+    item.innerHTML = `
+      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%;">📄 ${doc.name}</span>
+      <button type="button" class="btn btn-danger" style="font-size:10px; padding:2px 6px;">&times;</button>
+    `;
+    item.querySelector('button').addEventListener('click', () => {
+      currentEditingDocs.splice(index, 1);
+      renderEditDocs();
+    });
+    docsContainer.appendChild(item);
+  });
+}
+
 async function handleEditFormSubmit(e) {
   e.preventDefault();
   const id = document.getElementById('editId').value;
@@ -226,8 +273,13 @@ async function handleEditFormSubmit(e) {
   const lng = parseFloat(document.getElementById('editLng').value);
   const title = document.getElementById('editTitle').value;
   const description = document.getElementById('editDescription').value;
+  
   const files = document.getElementById('editNewImages').files;
   const newImages = await Promise.all(Array.from(files).map(file => compressImage(file)));
+
+  const newDocInput = document.getElementById('editNewDocs');
+  const newDocFiles = newDocInput ? newDocInput.files : [];
+  const newDocs = await Promise.all(Array.from(newDocFiles).map(file => fileToBase64(file)));
 
   try {
     await updateLocation(id, { 
@@ -236,11 +288,13 @@ async function handleEditFormSubmit(e) {
       title, 
       description, 
       images: [...currentEditingImages, ...newImages], 
+      documents: [...currentEditingDocs, ...newDocs],
       synced: false,
       timestamp: new Date().toISOString()
     });
 
     closeModal('editModal');
+    if (newDocInput) newDocInput.value = '';
     showToast('Izmjena sačuvana!', 'success');
 
     await syncLocationsWithCloud();
@@ -352,3 +406,4 @@ window.openEditModal = openEditModal;
 window.openImageFull = openImageFull;
 window.exportGeoJSON = exportGeoJSON;
 window.exportCSV = exportCSV;
+window.exportSingleLocationToDocx = exportSingleLocationToDocx;

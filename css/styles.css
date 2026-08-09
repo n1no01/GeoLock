@@ -168,7 +168,7 @@ main {
   top: 0; 
   left: 0; 
   width: 100vw; 
-  height: 100dvh; /* Dynamic viewport height prilagođen mobilnim traakama */
+  height: 100dvh;
   background: rgba(15, 23, 42, 0.75); 
   backdrop-filter: blur(4px); 
   z-index: 9999; 
@@ -244,6 +244,89 @@ main {
 .gallery-item img { width: 100%; height: 100px; object-fit: cover; display: block; }
 .delete-img-btn { position: absolute; top: 4px; right: 4px; background: rgba(239, 68, 68, 0.9); color: white; border: none; border-radius: 4px; padding: 2px 6px; font-size: 10px; }
 
+/* KARTICE PRILOŽENIH DOKUMENATA */
+.doc-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.doc-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.doc-icon {
+  font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  background-color: #f1f5f9;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.doc-info {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.doc-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #059669;
+  background-color: #ecfdf5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  width: fit-content;
+  margin-top: 2px;
+  border: 1px solid #a7f3d0;
+}
+
+.doc-download-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #2563eb;
+  color: #ffffff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease;
+}
+
+.doc-download-btn:hover {
+  background-color: #1d4ed8;
+  color: #ffffff;
+}
+
+.doc-download-btn svg {
+  stroke: currentColor;
+}
+
 /* OPTIMIZACIJA FORMI ZA DODIR (MOBILNI) */
 .form-group { margin-bottom: 12px; }
 .form-group label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 12px; color: #475569; }
@@ -252,7 +335,7 @@ main {
   padding: 12px; 
   border: 1px solid #cbd5e1; 
   border-radius: 8px; 
-  font-size: 16px; /* Prevents auto-zoom u iOS Safariju */
+  font-size: 16px;
 }
 
 .btn { 
@@ -284,15 +367,15 @@ main {
 .leaflet-control-layers-toggle {
   width: 44px !important;
   height: 44px !important;
-  background-size: 26px 26px !important; /* Prilagođava veličinu ikone unutar dugmeta */
+  background-size: 26px 26px !important;
 }
 
 /* Toast Obavještenja */
 .toast-notification {
   position: fixed;
-  top: 16px; /* Razmak od samog vrha ekrana */
+  top: 16px;
   left: 50%;
-  transform: translateX(-50%) translateY(-60px); /* Početno sakriveno iznad ekrana */
+  transform: translateX(-50%) translateY(-60px);
   background: #0f172a;
   color: #ffffff;
   padding: 10px 18px;
@@ -303,7 +386,7 @@ main {
   opacity: 0;
   visibility: hidden;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 999999 !important; /* Osigurava da je iznad navbara i modala */
+  z-index: 999999 !important;
   pointer-events: none;
   display: flex;
   align-items: center;
@@ -314,7 +397,7 @@ main {
 .toast-notification.show {
   opacity: 1;
   visibility: visible;
-  transform: translateX(-50%) translateY(0); /* Spušta se na tačnu poziciju */
+  transform: translateX(-50%) translateY(0);
 }
 
 .toast-notification.error {
@@ -328,7 +411,7 @@ main {
 .map-floating-tools {
   position: absolute;
   top: 10px;
-  left: 60px; /* Pomjereno od zoom kontrola */
+  left: 60px;
   z-index: 1000;
   display: flex;
   gap: 6px;

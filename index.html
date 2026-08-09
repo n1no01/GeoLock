@@ -9,6 +9,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/styles.css" />
+  <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
 </head>
 <body>
 
@@ -89,6 +90,13 @@
           <label>Fotografije s terena:</label>
           <input type="file" id="imageInput" accept="image/*" multiple>
         </div>
+
+        <!-- UNOS DOKUMENATA (PDF, WORD, EXCEL) -->
+        <div class="form-group">
+          <label>Priloženi dokumenti (PDF, Word, Excel):</label>
+          <input type="file" id="documentInput" accept=".pdf,.doc,.docx,.xls,.xlsx" multiple>
+        </div>
+
         <button type="submit" class="btn" style="width: 100%;">Sačuvaj Lokaciju</button>
       </form>
     </div>
@@ -129,10 +137,14 @@
         <audio id="modalAudioPlayer" controls style="width: 100%;"></audio>
       </div>
 
+      <!-- PRIKAZ DOKUMENATA U MODALU -->
+      <div id="modalDocsContainer" style="margin-bottom: 15px;"></div>
+
       <h4 style="margin: 10px 0 6px 0; font-size:13px; color:#475569;">Slike (<span id="modalImageCount">0</span>):</h4>
       <div class="modal-gallery" id="modalGallery"></div>
       
       <div style="margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
+        <button id="modalDocxBtn" class="btn btn-secondary" style="flex:1;">DOCX Izvještaj</button>
         <button id="modalEditBtn" class="btn btn-warning" style="flex:1;">Uredi</button>
         <button id="modalMapBtn" class="btn" style="flex:1;">Mapa</button>
         <button id="modalDeleteBtn" class="btn btn-danger" style="flex:1;">Obriši</button>
@@ -166,6 +178,17 @@
         <div class="form-group"><label>Opis:</label><textarea id="editDescription" rows="3"></textarea></div>
         <div class="form-group"><label>Slike:</label><div id="editExistingGallery" class="modal-gallery"></div></div>
         <div class="form-group"><label>Dodaj nove slike:</label><input type="file" id="editNewImages" accept="image/*" multiple></div>
+        
+        <!-- UREĐIVANJE DOKUMENATA U MODALU -->
+        <div class="form-group">
+          <label>Postojeći dokumenti:</label>
+          <div id="editExistingDocs" style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;"></div>
+        </div>
+        <div class="form-group">
+          <label>Dodaj nove dokumente:</label>
+          <input type="file" id="editNewDocs" accept=".pdf,.doc,.docx,.xls,.xlsx" multiple>
+        </div>
+
         <div style="margin-top: 15px; display: flex; gap: 8px;">
           <button type="button" class="btn btn-secondary" onclick="document.getElementById('editModal').classList.remove('open')" style="flex:1;">Odustani</button>
           <button type="submit" class="btn" style="flex:1;">Sačuvaj</button>
