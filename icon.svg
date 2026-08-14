@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <rect width="512" height="512" rx="110" fill="#0f172a"/>
+  
+  <!-- Outer Glow Ring -->
+  <circle cx="256" cy="256" r="180" fill="none" stroke="#2563eb" stroke-width="8" opacity="0.3"/>
+  
+  <!-- Map Pin Background -->
+  <path d="M256 96C176.47 96 112 160.47 112 240c0 105 128 208 144 220.8 2.8 2.2 6.4 2.2 9.2 0C281.6 448 400 345 400 240 400 160.47 335.53 96 256 96z" fill="#2563eb"/>
+  
+  <!-- Inner Dark Circle -->
+  <circle cx="256" cy="225" r="75" fill="#0f172a"/>
+  
+  <!-- Lock Symbol Inside Pin -->
+  <!-- Lock Shackle -->
+  <path d="M230 205v-18c0-14.35 11.65-26 26-26s26 11.65 26 26v18" fill="none" stroke="#38bdf8" stroke-width="12" stroke-linecap="round"/>
+  <!-- Lock Body -->
+  <rect x="220" y="205" width="72" height="56" rx="10" fill="#38bdf8"/>
+  <!-- Keyhole -->
+  <circle cx="256" cy="228" r="6" fill="#0f172a"/>
+  <path d="M253 228h6v14h-6z" fill="#0f172a"/>
+</svg>

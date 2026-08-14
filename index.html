@@ -5,9 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>GeoLock</title>
 
+  <!-- PWA MANIFEST & PODRŠKA ZASLONA -->
+  <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0f172a">
   <meta name="mobile-web-app-capable" content="yes">
+  
+  <!-- PODRŠKA ZA iOS / SAFARI FULLSCREEN -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="GeoLock">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
   <link rel="stylesheet" href="css/styles.css" />
   <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
 </head>
@@ -20,7 +28,7 @@
       <button id="tabMapBtn" class="tab-btn active">Mapa</button>
       <button id="tabListBtn" class="tab-btn">Lista (<span id="tab-count">0</span>)</button>
     </div>
-    
+
     <!-- DUGME/STATUS ZA BIOMETRIJU U HEADERU -->
     <div id="bioHeaderContainer" style="display: none;">
       <button id="enableBioHeaderBtn" class="auth-btn" style="background: #334155; border: 1px solid #475569; font-size: 11px;">
@@ -37,14 +45,7 @@
   <!-- TAB 1: MAPA I UNOS -->
   <div id="map-view" class="tab-content active" style="position: relative;">
     <div id="map"></div>
-    
-    <!-- LEBDEĆI ALATI NA MAPI (Zasebno od headera, idealno za mobilne uređaje) -->
-    <div class="map-floating-tools">
-      <button type="button" id="toggleMeasureBtn" class="map-tool-btn" title="Mjeri distancu/površinu">
-        📏 Mjeri
-      </button>
-    </div>
-    
+
     <div id="sidebar-add">
       <button type="button" id="gpsBtn" class="btn btn-gps">
         <span>📍 Očitaj trenutnu GPS lokaciju</span>
@@ -131,7 +132,7 @@
     <div class="modal-body">
       <div style="background:#f1f5f9; padding:6px 10px; border-radius:6px; font-family:monospace; font-size:12px; margin-bottom:10px;" id="modalCoords"></div>
       <div style="font-size:13px; line-height:1.5; margin-bottom:15px; white-space:pre-wrap;" id="modalDesc"></div>
-      
+
       <div id="modalAudioContainer" style="margin-bottom: 15px; display: none; background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
         <h4 style="margin: 0 0 6px 0; font-size:13px; color:#475569;">🔊 Glasovna bilješka:</h4>
         <audio id="modalAudioPlayer" controls style="width: 100%;"></audio>
@@ -142,7 +143,7 @@
 
       <h4 style="margin: 10px 0 6px 0; font-size:13px; color:#475569;">Slike (<span id="modalImageCount">0</span>):</h4>
       <div class="modal-gallery" id="modalGallery"></div>
-      
+
       <div style="margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
         <button id="modalDocxBtn" class="btn btn-secondary" style="flex:1;">DOCX Izvještaj</button>
         <button id="modalEditBtn" class="btn btn-warning" style="flex:1;">Uredi</button>
@@ -167,7 +168,7 @@
           <div class="form-group" style="flex:1;"><label>Lat:</label><input type="number" step="any" id="editLat" required></div>
           <div class="form-group" style="flex:1;"><label>Lng:</label><input type="number" step="any" id="editLng" required></div>
         </div>
-        
+
         <!-- MGRS POLJE U MODALU ZA UREĐIVANJE -->
         <div class="form-group">
           <label>MGRS Oznaka:</label>
@@ -178,7 +179,7 @@
         <div class="form-group"><label>Opis:</label><textarea id="editDescription" rows="3"></textarea></div>
         <div class="form-group"><label>Slike:</label><div id="editExistingGallery" class="modal-gallery"></div></div>
         <div class="form-group"><label>Dodaj nove slike:</label><input type="file" id="editNewImages" accept="image/*" multiple></div>
-        
+
         <!-- UREĐIVANJE DOKUMENATA U MODALU -->
         <div class="form-group">
           <label>Postojeći dokumenti:</label>
