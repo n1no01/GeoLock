@@ -5,7 +5,6 @@ import { encryptText, encryptMediaBase64 } from './crypto.js';
 
 // Upload enkriptovanog medijskog/dokumentacijskog fajla u Storage
 async function uploadEncryptedFile(base64Data, bucket, path) {
-  // Ako je već URL sa clouda, vrati ga bez ponovne obrade
   if (!base64Data || base64Data.startsWith('http')) return base64Data;
 
   const encryptedBlob = encryptMediaBase64(base64Data);
@@ -45,11 +44,12 @@ export async function downloadLocationsFromCloud() {
       return;
     }
 
-    if (data && data.length > 0) {
-      await mergeLocations(data);
-      if (typeof updateMapMarkers === 'function') {
-        updateMapMarkers();
-      }
+    // ISPRVALJENO: Pozivamo mergeLocations ČAK I AKO JE data prazan niz (data = [])
+    // da bi IndexedDB izbrisao sve lokalne stavke koje su obrisane na cloudu
+    await mergeLocations(data || []);
+
+    if (typeof updateMapMarkers === 'function') {
+      updateMapMarkers();
     }
   } catch (err) {
     console.warn("Offline ili mrežna greška pri preuzimanju lokacija:", err.message);
@@ -98,7 +98,7 @@ export async function syncLocationsWithCloud() {
             audioUrl = await uploadEncryptedFile(loc.audio, 'location-audio', `${user.id}/${loc.id}_audio`);
           }
 
-          // 4. Upload enkriptovanih dokumenata (sadržaj + ENKRIPTOVANI NAZIV)
+          // 4. Upload enkriptovanih dokumenata
           let docUrls = [];
           if (loc.documents && loc.documents.length > 0) {
             docUrls = await Promise.all(
@@ -109,7 +109,6 @@ export async function syncLocationsWithCloud() {
                   `${user.id}/${loc.id}_doc_${i}`
                 );
 
-                // Enkriptujemo naziv samo ako je u pitanju novi/čisti tekst naziva
                 const encryptedName = doc.data.startsWith('http') 
                   ? doc.name 
                   : encryptText(doc.name);

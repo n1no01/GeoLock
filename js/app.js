@@ -18,12 +18,17 @@ let isSignUpMode = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
   initMap((lat, lng) => {
-    document.getElementById('lat').value = lat.toFixed(6);
-    document.getElementById('lng').value = lng.toFixed(6);
-    updateMgrsFromLatLng();
+    const latInput = document.getElementById('lat');
+    const lngInput = document.getElementById('lng');
+    if (latInput && lngInput) {
+      latInput.value = lat.toFixed(6);
+      lngInput.value = lng.toFixed(6);
+      updateMgrsFromLatLng();
+    }
   });
 
   setupEventListeners();
+  setupMgrsListeners();
   await updateCounts();
   await checkAuthStatus();
 
@@ -35,6 +40,46 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 });
+
+// Pomoićna funkcija za MGRS na glavnoj formi
+function updateMgrsFromLatLng() {
+  const latInput = document.getElementById('lat');
+  const lngInput = document.getElementById('lng');
+  const mgrsInput = document.getElementById('mgrsInput');
+  if (!latInput || !lngInput || !mgrsInput) return;
+
+  const lat = parseFloat(latInput.value);
+  const lng = parseFloat(lngInput.value);
+  if (!isNaN(lat) && !isNaN(lng)) {
+    try {
+      mgrsInput.value = mgrs.forward([lng, lat], 5);
+    } catch (e) {
+      console.warn('MGRS Conversion error:', e);
+    }
+  } else {
+    mgrsInput.value = '';
+  }
+}
+
+// Pomoćna funkcija za MGRS na modal forme za izmjenu
+function updateEditMgrsFromLatLng() {
+  const latInput = document.getElementById('editLat');
+  const lngInput = document.getElementById('editLng');
+  const mgrsInput = document.getElementById('editMgrsInput');
+  if (!latInput || !lngInput || !mgrsInput) return;
+
+  const lat = parseFloat(latInput.value);
+  const lng = parseFloat(lngInput.value);
+  if (!isNaN(lat) && !isNaN(lng)) {
+    try {
+      mgrsInput.value = mgrs.forward([lng, lat], 5);
+    } catch (e) {
+      console.warn('MGRS Edit Conversion error:', e);
+    }
+  } else {
+    mgrsInput.value = '';
+  }
+}
 
 function setupEventListeners() {
   document.getElementById('tabMapBtn').addEventListener('click', () => switchTab('map-view'));
@@ -49,11 +94,15 @@ function setupEventListeners() {
     });
   }
 
-  document.getElementById('recordBtn').addEventListener('click', toggleRecording);
+  const recordBtn = document.getElementById('recordBtn');
+  if (recordBtn) {
+    recordBtn.addEventListener('click', toggleRecording);
+  }
 
   const latInput = document.getElementById('lat');
   const lngInput = document.getElementById('lng');
   const updatePreviewFromInputs = () => {
+    if (!latInput || !lngInput) return;
     const lat = parseFloat(latInput.value);
     const lng = parseFloat(lngInput.value);
     if (!isNaN(lat) && !isNaN(lng)) previewLocation(lat, lng);
@@ -72,7 +121,7 @@ function setupEventListeners() {
   document.getElementById('searchInput').addEventListener('input', renderListView);
   document.getElementById('sortSelect').addEventListener('change', renderListView);
 
-  // Auth i Biometrija eventi
+  // Auth & Biometrics
   const enableBioHeaderBtn = document.getElementById('enableBioHeaderBtn');
   if (enableBioHeaderBtn) {
     enableBioHeaderBtn.addEventListener('click', async () => {
@@ -126,18 +175,21 @@ function setupEventListeners() {
       const email = document.getElementById('authEmail').value;
       const password = document.getElementById('authPassword').value;
       const rememberMe = document.getElementById('rememberMe')?.checked ?? true;
-      deriveKeyFromCredentials(email, password);
 
       try {
         if (isSignUpMode) {
+          await deriveKeyFromCredentials(email, password);
           await signUpUser(email, password);
           showToast('Registracija uspješna! Provjerite email.', 'success');
         } else {
+          await deriveKeyFromCredentials(email, password);
           await signInUser(email, password, rememberMe);
+          
           showToast('Prijavljeni ste!', 'success');
           if (await isBiometricsAvailable() && localStorage.getItem('biometrics_enabled') !== 'true') {
             if (confirm("Želite li aktivirati biometrijsku prijavu?")) await registerBiometrics();
           }
+          
           await syncLocationsWithCloud();
           await updateMapMarkers();
           await renderListView();
@@ -151,7 +203,6 @@ function setupEventListeners() {
   }
 }
 
-// Pomoćna funkcija za pretvaranje dokumenata u Base64 objekat
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -177,7 +228,6 @@ async function handleAddFormSubmit(e) {
   const files = document.getElementById('imageInput').files;
   const images = await Promise.all(Array.from(files).map(file => compressImage(file)));
 
-  // Čitanje priloženih dokumenata (PDF, Word, Excel)
   const docInput = document.getElementById('documentInput');
   const docFiles = docInput ? docInput.files : [];
   const documents = await Promise.all(Array.from(docFiles).map(file => fileToBase64(file)));
@@ -214,6 +264,7 @@ async function openEditModal(id) {
   document.getElementById('editTitle').value = loc.title;
   document.getElementById('editDescription').value = loc.description || '';
   
+  // Učitavanje teksta u MGRS polje pri otvaranju modala
   updateEditMgrsFromLatLng();
 
   currentEditingImages = loc.images ? [...loc.images] : [];
@@ -331,72 +382,50 @@ function compressImage(file, maxWidth = 1600, quality = 0.7) {
   });
 }
 
-// MGRS konverzija u glavnoj formi (Dodavanje)
-const latInput = document.getElementById('lat');
-const lngInput = document.getElementById('lng');
-const mgrsInput = document.getElementById('mgrsInput');
+function setupMgrsListeners() {
+  const latInput = document.getElementById('lat');
+  const lngInput = document.getElementById('lng');
+  const mgrsInput = document.getElementById('mgrsInput');
 
-function updateMgrsFromLatLng() {
-  if (!latInput || !lngInput || !mgrsInput) return;
-  const lat = parseFloat(latInput.value);
-  const lng = parseFloat(lngInput.value);
-  if (!isNaN(lat) && !isNaN(lng)) {
-    try { mgrsInput.value = mgrs.forward([lng, lat], 5); } catch (e) {}
+  if (latInput && lngInput && mgrsInput) {
+    latInput.addEventListener('input', updateMgrsFromLatLng);
+    lngInput.addEventListener('input', updateMgrsFromLatLng);
+
+    mgrsInput.addEventListener('input', () => {
+      const val = mgrsInput.value.trim();
+      if (val.length >= 3) {
+        try {
+          const lngLat = mgrs.toPoint(val);
+          latInput.value = lngLat[1].toFixed(6);
+          lngInput.value = lngLat[0].toFixed(6);
+          previewLocation(lngLat[1], lngLat[0]);
+        } catch (e) {}
+      }
+    });
+  }
+
+  const editLatInput = document.getElementById('editLat');
+  const editLngInput = document.getElementById('editLng');
+  const editMgrsInput = document.getElementById('editMgrsInput');
+
+  if (editLatInput && editLngInput && editMgrsInput) {
+    editLatInput.addEventListener('input', updateEditMgrsFromLatLng);
+    editLngInput.addEventListener('input', updateEditMgrsFromLatLng);
+
+    editMgrsInput.addEventListener('input', () => {
+      const val = editMgrsInput.value.trim();
+      if (val.length >= 3) {
+        try {
+          const lngLat = mgrs.toPoint(val);
+          editLatInput.value = lngLat[1].toFixed(6);
+          editLngInput.value = lngLat[0].toFixed(6);
+        } catch (e) {}
+      }
+    });
   }
 }
 
-function updateLatLngFromMgrs() {
-  if (!latInput || !lngInput || !mgrsInput) return;
-  const val = mgrsInput.value.trim();
-  if (val.length > 5) {
-    try {
-      const lngLat = mgrs.toPoint(val);
-      latInput.value = lngLat[1].toFixed(6);
-      lngInput.value = lngLat[0].toFixed(6);
-      previewLocation(lngLat[1], lngLat[0]);
-    } catch (e) {}
-  }
-}
-
-if (latInput && lngInput && mgrsInput) {
-  latInput.addEventListener('input', updateMgrsFromLatLng);
-  lngInput.addEventListener('input', updateMgrsFromLatLng);
-  mgrsInput.addEventListener('input', updateLatLngFromMgrs);
-}
-
-// MGRS konverzija u Edit formi (Uređivanje)
-const editLatInput = document.getElementById('editLat');
-const editLngInput = document.getElementById('editLng');
-const editMgrsInput = document.getElementById('editMgrsInput');
-
-function updateEditMgrsFromLatLng() {
-  if (!editLatInput || !editLngInput || !editMgrsInput) return;
-  const lat = parseFloat(editLatInput.value);
-  const lng = parseFloat(editLngInput.value);
-  if (!isNaN(lat) && !isNaN(lng)) {
-    try { editMgrsInput.value = mgrs.forward([lng, lat], 5); } catch (e) {}
-  }
-}
-
-function updateEditLatLngFromMgrs() {
-  if (!editLatInput || !editLngInput || !editMgrsInput) return;
-  const val = editMgrsInput.value.trim();
-  if (val.length > 5) {
-    try {
-      const lngLat = mgrs.toPoint(val);
-      editLatInput.value = lngLat[1].toFixed(6);
-      editLngInput.value = lngLat[0].toFixed(6);
-    } catch (e) {}
-  }
-}
-
-if (editLatInput && editLngInput && editMgrsInput) {
-  editLatInput.addEventListener('input', updateEditMgrsFromLatLng);
-  editLngInput.addEventListener('input', updateEditMgrsFromLatLng);
-  editMgrsInput.addEventListener('input', updateEditLatLngFromMgrs);
-}
-
-// Globalne funkcije za HTML dugmad (onclick)
+// Globalne funkcije za HTML atribute
 window.switchTab = switchTab;
 window.getCurrentLocation = getCurrentLocation;
 window.toggleRecording = toggleRecording;

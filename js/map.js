@@ -3,15 +3,18 @@ import 'leaflet/dist/leaflet.css';
 import { getLocations } from './db.js';
 import * as mgrs from 'mgrs';
 
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-
 // Uvoz geokodera i njegovih stilova
 import 'leaflet-control-geocoder';
 import 'leaflet-control-geocoder/dist/Control.Geocoder.css';
 
+// 🛠️ ISPRAVAK IKONA: Pouzdan uvoz ikona za Vite / Webpack bundlere
+const markerIcon = new URL('leaflet/dist/images/marker-icon.png', import.meta.url).href;
+const markerIconRetina = new URL('leaflet/dist/images/marker-icon-2x.png', import.meta.url).href;
+const markerShadow = new URL('leaflet/dist/images/marker-shadow.png', import.meta.url).href;
+
 const DefaultIcon = L.icon({
   iconUrl: markerIcon,
+  iconRetinaUrl: markerIconRetina,
   shadowUrl: markerShadow,
   iconSize: [25, 41],
   iconAnchor: [12, 41],
@@ -37,7 +40,7 @@ export function initMap(onMapClickCallback) {
     attribution: '© OpenStreetMap'
   });
 
-  // 🛰️ Satelitski sloj (Esri World Imagery) - provjereni endpoint koji je radio
+  // 🛰️ Satelitski sloj (Esri World Imagery)
   satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 18,
     minZoom: 1,
@@ -46,7 +49,7 @@ export function initMap(onMapClickCallback) {
     detectRetina: true
   });
 
-  // Inicijalizacija mape sa standardnim slojem
+  // Inicijalizacija mape
   map = L.map('map', {
     center: [44.0, 17.8],
     zoom: 7,
@@ -58,39 +61,40 @@ export function initMap(onMapClickCallback) {
     placeholder: "Pretraži lokaciju ili adresu..."
   }).addTo(map);
 
-  // 🎛️ Kreiranje custom Toggle dugmeta
+  // 🎛️ Custom Toggle kontrola
   addMapToggleControl();
 
   markersGroup = L.layerGroup().addTo(map);
 
+  // 📍 Klik na mapu
   map.on('click', (e) => {
     const { lat, lng } = e.latlng;
+    
+    // 1. Prikazi privremeni marker odmah
+    previewLocation(lat, lng);
+
+    // 2. Pozovi callback iz app.js da ažurira input polja
     if (typeof onMapClickCallback === 'function') {
       onMapClickCallback(lat, lng);
     }
-    previewLocation(lat, lng);
   });
 
   updateMapMarkers();
 }
 
-// 🌐 Pomoćna funkcija za parsiranje unosa (podržava i MGRS i obične koordinate)
 export function parseLocationInput(input) {
   if (!input || typeof input !== 'string') return null;
   
   const trimmed = input.trim();
 
-  // Pokušaj konverzije MGRS stringa u tačku
   try {
     const lngLat = mgrs.toPoint(trimmed);
-    // mgrs.toPoint vraća [longitude, latitude]
     return {
       lat: lngLat[1],
       lng: lngLat[0],
       type: 'mgrs'
     };
   } catch (e) {
-    // Ako nije MGRS, provjeravamo da li su obične koordinate odvojene zarezom (lat, lng)
     const parts = trimmed.split(',');
     if (parts.length === 2) {
       const lat = parseFloat(parts[0]);
@@ -103,7 +107,6 @@ export function parseLocationInput(input) {
   }
 }
 
-// 🔘 Sigurni Toggle sistem za prebacivanje slojeva
 function addMapToggleControl() {
   const ToggleControl = L.Control.extend({
     options: { position: 'topright' },
@@ -131,7 +134,6 @@ function addMapToggleControl() {
           isSatellite = true;
         }
 
-        // Forsira ponovno iscrtavanje pločica
         setTimeout(() => {
           map.invalidateSize();
         }, 100);
@@ -186,7 +188,23 @@ export function previewLocation(lat, lng) {
   if (previewMarker) {
     previewMarker.setLatLng([parsedLat, parsedLng]);
   } else {
-    previewMarker = L.marker([parsedLat, parsedLng], { opacity: 0.7 }).addTo(map);
+    // Postavljen opacity: 1 da se pin jasno vidi
+    previewMarker = L.marker([parsedLat, parsedLng], { 
+      opacity: 1,
+      draggable: true 
+    }).addTo(map);
+
+    // Omogućeno prevlačenje pina za precizno namještanje
+    previewMarker.on('dragend', (e) => {
+      const pos = e.target.getLatLng();
+      const latInput = document.getElementById('lat');
+      const lngInput = document.getElementById('lng');
+      if (latInput && lngInput) {
+        latInput.value = pos.lat.toFixed(6);
+        lngInput.value = pos.lng.toFixed(6);
+        latInput.dispatchEvent(new Event('input'));
+      }
+    });
   }
 
   map.panTo([parsedLat, parsedLng]);

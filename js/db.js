@@ -177,7 +177,7 @@ export async function syncPendingDeletions() {
 }
 
 // 5. Sinhronizuj lokacije sa clouda u IndexedDB
-export async function mergeLocations(cloudLocations) {
+export async function mergeLocations(cloudLocations = []) {
   // Prvo očisti sve obrisane stavke koje su čekale mrežu
   await syncPendingDeletions();
 
@@ -186,7 +186,7 @@ export async function mergeLocations(cloudLocations) {
   // Dovedi trenutnu listu ponovo nakon čišćenja obrisanih
   const localLocations = await getLocations();
   
-  // Dovedi pretostale ID-eve koji su još uvijek u deleted_locations (ako neki ne uspije na Supabase-u)
+  // Dovedi preostale ID-eve koji su još uvijek u deleted_locations (ako neki ne uspije na Supabase-u)
   const pendingDeletes = await new Promise((resolve) => {
     const transaction = db.transaction(DELETED_STORE_NAME, 'readonly');
     const store = transaction.objectStore(DELETED_STORE_NAME);
@@ -197,13 +197,19 @@ export async function mergeLocations(cloudLocations) {
 
   const map = new Map();
 
-  // Prvo u mapu uvrsti sve ne-sinhronizovane lokalne izmjene
-  localLocations.forEach(loc => map.set(String(loc.id), loc));
+  // KLJUČNA ISPRAVKA: U mapu ubacujemo SAMO lokalne unose koji još NISU sinhronizovani (synced === false)
+  // Lokalne unose sa synced === true NE ubacujemo unaprijed – ako još uvijek postoje na cloudu, biće dodani u for petlji ispod.
+  localLocations.forEach(loc => {
+    const locId = String(loc.id);
+    if (loc.synced === false && !pendingDeletes.includes(locId)) {
+      map.set(locId, loc);
+    }
+  });
 
   for (const cloudLoc of cloudLocations) {
     const locId = String(cloudLoc.id);
 
-    // Ako je stavka u deleted listi, preskoči je!
+    // Ako je stavka u deleted listi, preskoči je
     if (pendingDeletes.includes(locId)) {
       continue;
     }
