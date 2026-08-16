@@ -5,6 +5,9 @@ import { renderListView, showToast } from './ui.js';
 import { registerBiometrics, authenticateWithBiometrics, isBiometricsAvailable } from './biometrics.js';
 import { deriveKeyFromCredentials } from './crypto.js';
 
+// Pomoćna varijabla za praćenje biometrijske sesije kad nema Supabase usera
+let isBiometricAuthenticated = false;
+
 export async function checkAuthStatus() {
   try {
     const user = await getCurrentUser();
@@ -15,15 +18,16 @@ export async function checkAuthStatus() {
     const authModal = document.getElementById('authModal');
     const mainContent = document.querySelector('main');
 
-    if (user) {
-      // 🟢 Korisnik je prijavljen
+    if (user || isBiometricAuthenticated) {
+      // 🟢 Korisnik je prijavljen (preko Supabase ili Biometrije)
       if (authModal) authModal.classList.remove('open');
       if (mainContent) { 
         mainContent.style.pointerEvents = 'auto'; 
         mainContent.style.filter = 'none'; 
       }
 
-      if (authBtn) authBtn.innerText = 'Odjava (' + user.email.split('@')[0] + ')';
+      const userLabel = user?.email ? ` (${user.email.split('@')[0]})` : '';
+      if (authBtn) authBtn.innerText = 'Odjava' + userLabel;
       if (syncStatus) syncStatus.innerText = navigator.onLine ? '☁️ Povezano' : '🔒 Offline rad';
 
       const bioAvailable = await isBiometricsAvailable();
@@ -46,7 +50,7 @@ export async function checkAuthStatus() {
       await updateMapMarkers();
       await renderListView();
     } else {
-      // 🔴 Nema Supabase sesije - provjeri da li je omogućena biometrija za lokalni offline ulazak
+      // 🔴 Nema sesije
       const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
       const bioContainer = document.getElementById('bioFastLoginContainer');
       if (bioContainer) bioContainer.style.display = isBioEnabled ? 'block' : 'none';
@@ -74,11 +78,13 @@ export async function handleBiometricLogin() {
   const success = await authenticateWithBiometrics();
 
   if (success) {
+    isBiometricAuthenticated = true;
     showToast("Biometrijska verifikacija uspješna! 🔓", "success");
 
     const authModal = document.getElementById('authModal');
     const mainContent = document.querySelector('main');
     const syncStatus = document.getElementById('syncStatus');
+    const authBtn = document.getElementById('authBtn');
 
     // Otključaj UI odmah
     if (authModal) authModal.classList.remove('open');
@@ -87,8 +93,9 @@ export async function handleBiometricLogin() {
       mainContent.style.filter = 'none'; 
     }
 
+    if (authBtn) authBtn.innerText = 'Odjava';
     if (syncStatus) {
-      syncStatus.innerText = navigator.onLine ? '☁️ Povezano (Biometrija)' : '🔒 Offline rad';
+      syncStatus.innerText = navigator.onLine ? '☁️ Povezano' : '🔒 Offline rad';
     }
 
     // Osvježi mrežne podatke i prikaži mapu
@@ -100,8 +107,30 @@ export async function handleBiometricLogin() {
   }
 }
 
+// 🚪 Odjava
+export async function handleLogout() {
+  isBiometricAuthenticated = false;
+  await signOutUser();
+  await checkAuthStatus();
+  showToast("Uspješno ste se odjavili.", "info");
+}
+
 // 📌 Registracija event listenera pri inicijalizaciji aplikacije
 export function initAuthListeners() {
+  // Dugme u headeru (Prijava / Odjava)
+  const authBtn = document.getElementById('authBtn');
+  if (authBtn) {
+    authBtn.addEventListener('click', async () => {
+      const user = await getCurrentUser();
+      if (user || isBiometricAuthenticated) {
+        await handleLogout();
+      } else {
+        const authModal = document.getElementById('authModal');
+        if (authModal) authModal.classList.add('open');
+      }
+    });
+  }
+
   // Dugme za aktivaciju biometrije u headeru / postavkama
   const enableBioBtn = document.getElementById('enableBioHeaderBtn');
   if (enableBioBtn) {
