@@ -5,12 +5,12 @@ import { exportGeoJSON, exportCSV, exportSingleLocationToDocx } from './export.j
 import { getCurrentUser, onAuthStateChange, signUpUser, signInUser, signOutUser } from './supabase.js';
 import { syncLocationsWithCloud } from './sync.js';
 import { saveLocation, updateLocation, getLocations } from './db.js';
-import { isBiometricsAvailable, registerBiometrics, authenticateWithBiometrics } from './biometrics.js';
+import { isBiometricsAvailable, registerBiometrics } from './biometrics.js';
 import { deriveKeyFromCredentials } from './crypto.js';
 import * as mgrs from 'mgrs';
 
 import { switchTab, renderListView, openModal, closeModal, openImageFull, showToast, updateCounts } from './ui.js';
-import { checkAuthStatus } from './auth.js';
+import { checkAuthStatus, initAuthListeners } from './auth.js';
 
 let currentEditingImages = [];
 let currentEditingDocs = [];
@@ -27,6 +27,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // Inicijalizacija biometrijskih listenera iz auth.js
+  initAuthListeners();
+
   setupEventListeners();
   setupMgrsListeners();
   await updateCounts();
@@ -41,7 +44,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-// Pomoićna funkcija za MGRS na glavnoj formi
+// Pomoćna funkcija za MGRS na glavnoj formi
 function updateMgrsFromLatLng() {
   const latInput = document.getElementById('lat');
   const lngInput = document.getElementById('lng');
@@ -121,28 +124,7 @@ function setupEventListeners() {
   document.getElementById('searchInput').addEventListener('input', renderListView);
   document.getElementById('sortSelect').addEventListener('change', renderListView);
 
-  // Auth & Biometrics
-  const enableBioHeaderBtn = document.getElementById('enableBioHeaderBtn');
-  if (enableBioHeaderBtn) {
-    enableBioHeaderBtn.addEventListener('click', async () => {
-      if (!await isBiometricsAvailable()) {
-        showToast("Uređaj ne podržava biometriju.", "error");
-        return;
-      }
-      if (await registerBiometrics()) await checkAuthStatus();
-    });
-  }
-
-  const bioBtn = document.getElementById('biometricsBtn');
-  if (bioBtn) {
-    bioBtn.addEventListener('click', async () => {
-      if (await authenticateWithBiometrics()) {
-        document.getElementById('authModal').classList.remove('open');
-        await checkAuthStatus();
-      }
-    });
-  }
-
+  // Standardni Auth (Sign In / Sign Out)
   const authBtn = document.getElementById('authBtn');
   if (authBtn) {
     authBtn.addEventListener('click', async () => {
@@ -264,7 +246,6 @@ async function openEditModal(id) {
   document.getElementById('editTitle').value = loc.title;
   document.getElementById('editDescription').value = loc.description || '';
   
-  // Učitavanje teksta u MGRS polje pri otvaranju modala
   updateEditMgrsFromLatLng();
 
   currentEditingImages = loc.images ? [...loc.images] : [];

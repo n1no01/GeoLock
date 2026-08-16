@@ -1,5 +1,19 @@
 import { getSecretKey, setSecretKey } from './crypto.js';
 
+// Pomoćne funkcije za konverziju ArrayBuffer <-> Base64
+function arrayBufferToBase64(buffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+}
+
+function base64ToArrayBuffer(base64) {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
 export async function isBiometricsAvailable() {
   if (window.PublicKeyCredential && 
       PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) {
@@ -35,16 +49,20 @@ export async function registerBiometrics() {
 
     const publicKeyCredentialCreationOptions = {
       challenge: challenge,
-      rp: { name: "Terenska Evidencija", id: window.location.hostname },
+      rp: { name: "GeoLock", id: window.location.hostname },
       user: {
         id: userId,
-        name: "terenski_istrazitelj",
-        displayName: "Terenski Istražitelj"
+        name: "geolock_user",
+        displayName: "GeoLock User"
       },
-      pubKeyCredParams: [{ alg: -7, type: "public-key" }],
+      pubKeyCredParams: [
+        { alg: -7, type: "public-key" },  // ES256
+        { alg: -257, type: "public-key" } // RS256
+      ],
       authenticatorSelection: {
-        authenticatorAttachment: "platform",
-        userVerification: "required"
+        authenticatorAttachment: "platform", // Isključivo ugrađeni čitač (otisak/Windows Hello)
+        userVerification: "required",
+        residentKey: "preferred"
       },
       timeout: 60000
     };
@@ -54,10 +72,13 @@ export async function registerBiometrics() {
     });
 
     if (credential) {
-      // Sačuvamo AES ključ u LocalStorage označen kao biometrijski zaštićen
+      // 🔑 KLJUČNO: Sačuvamo Credential ID u Base64 formatu
+      const credIdBase64 = arrayBufferToBase64(credential.rawId);
+      localStorage.setItem('bio_cred_id', credIdBase64);
       localStorage.setItem('bio_vault_key', currentKey);
       localStorage.setItem('biometrics_enabled', 'true');
-      alert("Otisak prsta / FaceID uspješno povezan sa vašim nalogom na ovom uređaju! 🔐");
+      
+      alert("Otisak prsta / FaceID / Windows Hello uspješno povezan! 🔐");
       return true;
     }
   } catch (err) {
@@ -70,8 +91,9 @@ export async function registerBiometrics() {
 export async function authenticateWithBiometrics() {
   const isEnabled = localStorage.getItem('biometrics_enabled') === 'true';
   const storedKey = localStorage.getItem('bio_vault_key');
+  const credIdBase64 = localStorage.getItem('bio_cred_id');
 
-  if (!isEnabled || !storedKey) {
+  if (!isEnabled || !storedKey || !credIdBase64) {
     alert("Biometrija nije aktivirana na ovom uređaju. Prijavite se emailom i lozinkom.");
     return false;
   }
@@ -80,8 +102,17 @@ export async function authenticateWithBiometrics() {
     const challenge = new Uint8Array(32);
     window.crypto.getRandomValues(challenge);
 
+    const rawId = base64ToArrayBuffer(credIdBase64);
+
     const publicKeyCredentialRequestOptions = {
       challenge: challenge,
+      rpId: window.location.hostname,
+      // 🔑 KLJUČNO: Ciljamo tačan registrovani biometrijski ključ (sprečava Google Password Manager)
+      allowCredentials: [{
+        id: rawId,
+        type: 'public-key',
+        transports: ['internal']
+      }],
       userVerification: "required",
       timeout: 60000
     };
@@ -91,7 +122,6 @@ export async function authenticateWithBiometrics() {
     });
 
     if (assertion) {
-      // Otključavamo sačuvani AES ključ naloga
       setSecretKey(storedKey);
       console.log("Biometrijska verifikacija uspješna! Enkripcijski ključ otključan. 🔓");
       return true;
