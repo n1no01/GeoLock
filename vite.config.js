@@ -6,7 +6,14 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon192.png', 'icon512.png'],
+      includeAssets: [
+        'favicon.ico', 
+        'favicon-16x16.png', 
+        'favicon-32x32.png', 
+        'apple-touch-icon.png', 
+        'icon192.png', 
+        'icon512.png'
+      ],
       workbox: {
         // Povećaj limit za precache ako imaš veće assets ili skrinšotove (npr. 4 MB)
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
@@ -45,8 +52,8 @@ export default defineConfig({
         ]
       },
       manifest: {
-        name: 'Terenska Evidencija',
-        short_name: 'Evidencija',
+        name: 'GeoLock',
+        short_name: 'GeoLock',
         description: 'Offline geographic mapping and logging app',
         theme_color: '#0f172a',
         background_color: '#0f172a',
