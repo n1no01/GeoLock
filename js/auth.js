@@ -26,8 +26,7 @@ export async function checkAuthStatus() {
         mainContent.style.filter = 'none'; 
       }
 
-      const userLabel = user?.email ? ` (${user.email.split('@')[0]})` : '';
-      if (authBtn) authBtn.innerText = 'Odjava' + userLabel;
+      if (authBtn) authBtn.innerText = 'Odjava';
       if (syncStatus) syncStatus.innerText = navigator.onLine ? '☁️ Povezano' : '🔒 Offline rad';
 
       const bioAvailable = await isBiometricsAvailable();
