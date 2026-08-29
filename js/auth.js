@@ -38,7 +38,7 @@ export async function checkAuthStatus() {
     }
 
     if (authBtn) authBtn.innerText = 'Odjava';
-    if (syncStatus) syncStatus.innerText = navigator.onLine ? '☁️ Povezano' : '🔒 Offline rad (Planina)';
+    if (syncStatus) syncStatus.innerText = (navigator.onLine && user) ? '☁️ Povezano na Cloud' : '🔒 Offline rad (Lokalno)';
 
     const bioAvailable = await isBiometricsAvailable();
     const isBioEnabled = localStorage.getItem('biometrics_enabled') === 'true';
@@ -56,12 +56,12 @@ export async function checkAuthStatus() {
       bioHeaderContainer.style.display = 'none';
     }
 
-    // Sinhronizuj samo ako imamo mrežu
-    if (navigator.onLine) {
+    // Sinhronizuj samo ako imamo pravu Supabase sesiju na mreži
+    if (navigator.onLine && user) {
       try {
         await syncLocationsWithCloud();
       } catch (e) {
-        console.warn("Sinhronizacija preskočena (nema mreže):", e);
+        console.warn("Sinhronizacija preskočena/greška:", e);
       }
     }
 
@@ -94,9 +94,22 @@ export async function handleBiometricLogin() {
 
   if (success) {
     isBiometricAuthenticated = true;
-    localStorage.setItem('bio_session_active', 'true'); // Pamti offline sesiju
-    showToast("Biometrijska verifikacija uspješna! 🔓", "success");
+    localStorage.setItem('bio_session_active', 'true');
 
+    // Ako ima interneta, pokušaj se tiho prijaviti na Supabase radi sinhronizacije
+    const savedEmail = localStorage.getItem('bio_user_email');
+    const savedPassword = localStorage.getItem('bio_user_pass');
+
+    if (navigator.onLine && savedEmail && savedPassword) {
+      try {
+        await signInUser(savedEmail, savedPassword);
+        await deriveKeyFromCredentials(savedEmail, savedPassword);
+      } catch (err) {
+        console.warn("Pozadinska Supabase prijava nije uspjela, nastavljam u offline načinu:", err);
+      }
+    }
+
+    showToast("Biometrijska verifikacija uspješna! 🔓", "success");
     await checkAuthStatus();
   } else {
     showToast("Biometrijska verifikacija nije uspjela.", "error");
@@ -125,7 +138,8 @@ export function initAuthListeners() {
   const authBtn = document.getElementById('authBtn');
   if (authBtn) {
     authBtn.addEventListener('click', async () => {
-      if (isBiometricAuthenticated || (navigator.onLine && await getCurrentUser())) {
+      const user = navigator.onLine ? await getCurrentUser() : null;
+      if (isBiometricAuthenticated || user) {
         await handleLogout();
       } else {
         const authModal = document.getElementById('authModal');
@@ -149,4 +163,10 @@ export function initAuthListeners() {
   if (bioFastLoginBtn) {
     bioFastLoginBtn.addEventListener('click', handleBiometricLogin);
   }
+
+  // 📡 Automatska sinhronizacija čim uređaj dobije internet
+  window.addEventListener('online', async () => {
+    showToast("Internet konekcija uspostavljena! Provjeravam sinhronizaciju...", "info");
+    await checkAuthStatus();
+  });
 }

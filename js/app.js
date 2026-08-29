@@ -10,13 +10,14 @@ import { deriveKeyFromCredentials } from './crypto.js';
 import * as mgrs from 'mgrs';
 
 import { switchTab, renderListView, openModal, closeModal, openImageFull, showToast, updateCounts } from './ui.js';
-import { checkAuthStatus, initAuthListeners } from './auth.js';
+import { checkAuthStatus, initAuthListeners, handleLogout } from './auth.js';
 
 let currentEditingImages = [];
 let currentEditingDocs = [];
 let isSignUpMode = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Inicijalizacija mape i povezivanje sa Lat/Lng/MGRS poljima
   initMap((lat, lng) => {
     const latInput = document.getElementById('lat');
     const lngInput = document.getElementById('lng');
@@ -27,7 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Inicijalizacija biometrijskih listenera iz auth.js
+  // Inicijalizacija biometrijskih i auth listenera iz auth.js
   initAuthListeners();
 
   setupEventListeners();
@@ -85,9 +86,13 @@ function updateEditMgrsFromLatLng() {
 }
 
 function setupEventListeners() {
-  document.getElementById('tabMapBtn').addEventListener('click', () => switchTab('map-view'));
-  document.getElementById('tabListBtn').addEventListener('click', () => switchTab('list-view'));
+  // Tab navigacija
+  const tabMapBtn = document.getElementById('tabMapBtn');
+  const tabListBtn = document.getElementById('tabListBtn');
+  if (tabMapBtn) tabMapBtn.addEventListener('click', () => switchTab('map-view'));
+  if (tabListBtn) tabListBtn.addEventListener('click', () => switchTab('list-view'));
 
+  // GPS dugme
   const gpsBtn = document.getElementById('gpsBtn');
   if (gpsBtn) {
     gpsBtn.addEventListener('click', async () => {
@@ -97,11 +102,13 @@ function setupEventListeners() {
     });
   }
 
+  // Snimanje zvuka
   const recordBtn = document.getElementById('recordBtn');
   if (recordBtn) {
     recordBtn.addEventListener('click', toggleRecording);
   }
 
+  // Ručni unos Lat/Lng sa pregledom na mapi
   const latInput = document.getElementById('lat');
   const lngInput = document.getElementById('lng');
   const updatePreviewFromInputs = () => {
@@ -116,29 +123,25 @@ function setupEventListeners() {
     lngInput.addEventListener('input', updatePreviewFromInputs);
   }
 
-  document.getElementById('exportGeoJsonBtn').addEventListener('click', exportGeoJSON);
-  document.getElementById('exportCsvBtn').addEventListener('click', exportCSV);
-  document.getElementById('locationForm').addEventListener('submit', handleAddFormSubmit);
-  document.getElementById('editForm').addEventListener('submit', handleEditFormSubmit);
+  // Eksport dugmad
+  const exportGeoBtn = document.getElementById('exportGeoJsonBtn');
+  const exportCsvBtn = document.getElementById('exportCsvBtn');
+  if (exportGeoBtn) exportGeoBtn.addEventListener('click', exportGeoJSON);
+  if (exportCsvBtn) exportCsvBtn.addEventListener('click', exportCSV);
 
-  document.getElementById('searchInput').addEventListener('input', renderListView);
-  document.getElementById('sortSelect').addEventListener('change', renderListView);
+  // Forme
+  const locForm = document.getElementById('locationForm');
+  const editForm = document.getElementById('editForm');
+  if (locForm) locForm.addEventListener('submit', handleAddFormSubmit);
+  if (editForm) editForm.addEventListener('submit', handleEditFormSubmit);
 
-  // Standardni Auth (Sign In / Sign Out)
-  const authBtn = document.getElementById('authBtn');
-  if (authBtn) {
-    authBtn.addEventListener('click', async () => {
-      if (await getCurrentUser()) {
-        if (confirm('Želite li se odjaviti?')) {
-          await signOutUser();
-          await checkAuthStatus();
-        }
-      } else {
-        await checkAuthStatus();
-      }
-    });
-  }
+  // Pretraga i sortiranje
+  const searchInput = document.getElementById('searchInput');
+  const sortSelect = document.getElementById('sortSelect');
+  if (searchInput) searchInput.addEventListener('input', renderListView);
+  if (sortSelect) sortSelect.addEventListener('change', renderListView);
 
+  // Prebacivanje između Prijava / Registracija moda
   const toggleAuthLink = document.getElementById('toggleAuthMode');
   if (toggleAuthLink) {
     toggleAuthLink.addEventListener('click', (e) => {
@@ -150,6 +153,7 @@ function setupEventListeners() {
     });
   }
 
+  // Submit Auth forme
   const authForm = document.getElementById('authForm');
   if (authForm) {
     authForm.addEventListener('submit', async (e) => {
@@ -176,7 +180,7 @@ function setupEventListeners() {
           await updateMapMarkers();
           await renderListView();
         }
-        document.getElementById('authModal').classList.remove('open');
+        closeModal('authModal');
         await checkAuthStatus();
       } catch (err) {
         showToast('Greška: ' + err.message, 'error');
@@ -185,6 +189,7 @@ function setupEventListeners() {
   }
 }
 
+// Konverzija fajla u Base64 format
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -194,9 +199,39 @@ function fileToBase64(file) {
   });
 }
 
+// Kompresija slika putem Canvas-a
+function compressImage(file, maxWidth = 1600, quality = 0.7) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width, height = img.height;
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+    };
+  });
+}
+
 async function handleAddFormSubmit(e) {
   e.preventDefault();
-  if (!await getCurrentUser()) {
+  
+  // Provjera: Korisnik je prijavljen ako postoji Supabase user ILI aktivna biometrijska sesija
+  const user = await getCurrentUser();
+  const isBioAuth = localStorage.getItem('bio_session_active') === 'true';
+
+  if (!user && !isBioAuth) {
     showToast('Morate biti prijavljeni!', 'error');
     await checkAuthStatus();
     return;
@@ -227,14 +262,25 @@ async function handleAddFormSubmit(e) {
   resetAudioState();
   document.getElementById('locationForm').reset();
   if (docInput) docInput.value = '';
-  document.getElementById('gpsStatus').innerText = '';
+  const gpsStatus = document.getElementById('gpsStatus');
+  if (gpsStatus) gpsStatus.innerText = '';
+  
   showToast('Lokacija i prilozi sačuvani lokalno!', 'success');
 
-  await syncLocationsWithCloud();
+  // Sinhronizaciju pokušaj samo ako postoji stvarna Supabase sesija i internet konekcija
+  if (user && navigator.onLine) {
+    try {
+      await syncLocationsWithCloud();
+    } catch (err) {
+      console.warn("Sinhronizacija pri dodavanju preskočena:", err);
+    }
+  }
+
   await updateMapMarkers();
   await renderListView();
 }
 
+// Otvaranje modala za izmjenu
 async function openEditModal(id) {
   const locations = await getLocations();
   const loc = locations.find(l => String(l.id) === String(id));
@@ -254,9 +300,10 @@ async function openEditModal(id) {
   currentEditingDocs = loc.documents ? [...loc.documents] : [];
   renderEditDocs();
 
-  document.getElementById('editModal').classList.add('open');
+  openModal('editModal');
 }
 
+// Prikaz postojećih slika u modalima za izmjenu
 function renderEditGallery() {
   const gallery = document.getElementById('editExistingGallery');
   if (!gallery) return;
@@ -273,6 +320,7 @@ function renderEditGallery() {
   });
 }
 
+// Prikaz postojećih dokumenata u modalima za izmjenu
 function renderEditDocs() {
   const docsContainer = document.getElementById('editExistingDocs');
   if (!docsContainer) return;
@@ -285,7 +333,7 @@ function renderEditDocs() {
 
   currentEditingDocs.forEach((doc, index) => {
     const item = document.createElement('div');
-    item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;';
+    item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px; margin-bottom:4px;';
     item.innerHTML = `
       <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%;">📄 ${doc.name}</span>
       <button type="button" class="btn btn-danger" style="font-size:10px; padding:2px 6px;">&times;</button>
@@ -298,6 +346,7 @@ function renderEditDocs() {
   });
 }
 
+// Obrada čuvanja izmjena lokacije
 async function handleEditFormSubmit(e) {
   e.preventDefault();
   const id = document.getElementById('editId').value;
@@ -327,9 +376,19 @@ async function handleEditFormSubmit(e) {
 
     closeModal('editModal');
     if (newDocInput) newDocInput.value = '';
+    const editNewImages = document.getElementById('editNewImages');
+    if (editNewImages) editNewImages.value = '';
+
     showToast('Izmjena sačuvana!', 'success');
 
-    await syncLocationsWithCloud();
+    if (navigator.onLine) {
+      try {
+        await syncLocationsWithCloud();
+      } catch (err) {
+        console.warn("Sinhronizacija pri izmjeni preskočena:", err);
+      }
+    }
+
     await updateMapMarkers();
     await renderListView();
 
@@ -339,30 +398,7 @@ async function handleEditFormSubmit(e) {
   }
 }
 
-function compressImage(file, maxWidth = 1600, quality = 0.7) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target.result;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width, height = img.height;
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
-        }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-    };
-  });
-}
-
+// Dvosmjerno osluškivanje MGRS unosa i Lat/Lng pretvaranje
 function setupMgrsListeners() {
   const latInput = document.getElementById('lat');
   const lngInput = document.getElementById('lng');
@@ -406,7 +442,7 @@ function setupMgrsListeners() {
   }
 }
 
-// Globalne funkcije za HTML atribute
+// Globalne funkcije za HTML inline event handlere
 window.switchTab = switchTab;
 window.getCurrentLocation = getCurrentLocation;
 window.toggleRecording = toggleRecording;
@@ -417,3 +453,4 @@ window.openImageFull = openImageFull;
 window.exportGeoJSON = exportGeoJSON;
 window.exportCSV = exportCSV;
 window.exportSingleLocationToDocx = exportSingleLocationToDocx;
+window.centerMap = centerMap;

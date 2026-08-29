@@ -6,6 +6,7 @@ const KEY_STORAGE_NAME = 'terenska_secret_key';
 export function deriveKeyFromCredentials(email, password) {
   if (!email || !password) return null;
   const salt = CryptoJS.SHA256(email.toLowerCase().trim()).toString();
+  
   // Korištenje PBKDF2 sa 10.000 iteracija za sigurno izvođenje ključa
   const derivedKey = CryptoJS.PBKDF2(password, salt, {
     keySize: 256 / 32,

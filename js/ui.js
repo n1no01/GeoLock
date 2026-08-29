@@ -65,9 +65,9 @@ export async function renderListView() {
 
     let mgrsText = '';
     try {
-      const lat = parseFloat(loc.lat);
-      const lng = parseFloat(loc.lng);
-      if (!isNaN(lat) && !isNaN(lng)) {
+      const lat = Number(loc.lat);
+      const lng = Number(loc.lng);
+      if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && (lat !== 0 || lng !== 0)) {
         mgrsText = mgrs.forward([lng, lat], 5);
       }
     } catch (e) {
@@ -110,9 +110,9 @@ export async function openModal(id) {
   
   let modalMgrsText = '';
   try {
-    const lat = parseFloat(loc.lat);
-    const lng = parseFloat(loc.lng);
-    if (!isNaN(lat) && !isNaN(lng)) {
+    const lat = Number(loc.lat);
+    const lng = Number(loc.lng);
+    if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && (lat !== 0 || lng !== 0)) {
       modalMgrsText = ` | MGRS: ${mgrs.forward([lng, lat], 5)}`;
     }
   } catch(e) {}
@@ -131,7 +131,7 @@ export async function openModal(id) {
     audioContainer.style.display = 'none';
   }
 
-  // Priloženi dokumenti (PDF, Word, Excel)
+  // Priloženi dokumenti
   const docsContainer = document.getElementById('modalDocsContainer');
   if (docsContainer) {
     docsContainer.innerHTML = '';
@@ -154,7 +154,7 @@ export async function openModal(id) {
                 <line x1="12" y1="15" x2="12" y2="3"></line>
               </svg>
               <span>Preuzmi</span>
-            </a>
+            </div>
           </div>
         `;
       });

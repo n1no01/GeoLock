@@ -1,5 +1,5 @@
 import { supabase, getCurrentUser } from './supabase.js';
-import { decryptText, decryptMediaFromUrl } from './crypto.js';
+import { decryptText, decryptMediaFromUrl, getSecretKey } from './crypto.js';
 
 const DB_NAME = 'GeoLockDB';
 const DB_VERSION = 2; // Povećan verzijski broj zbog nove tabele deleted_locations
@@ -50,6 +50,10 @@ export async function getLocations() {
 
 // 2. Sačuvaj novu lokaciju
 export async function saveLocation(location) {
+  if (!getSecretKey()) {
+    console.warn("Upozorenje: Enkripcijski ključ nije prisutan. Spremanje se obavlja neenkiptovano ili ograničeno.");
+  }
+
   location.synced = location.synced || false;
   location.id = String(location.id);
 
@@ -197,8 +201,7 @@ export async function mergeLocations(cloudLocations = []) {
 
   const map = new Map();
 
-  // KLJUČNA ISPRAVKA: U mapu ubacujemo SAMO lokalne unose koji još NISU sinhronizovani (synced === false)
-  // Lokalne unose sa synced === true NE ubacujemo unaprijed – ako još uvijek postoje na cloudu, biće dodani u for petlji ispod.
+  // U mapu ubacujemo SAMO lokalne unose koji još NISU sinhronizovani (synced === false)
   localLocations.forEach(loc => {
     const locId = String(loc.id);
     if (loc.synced === false && !pendingDeletes.includes(locId)) {
@@ -221,14 +224,15 @@ export async function mergeLocations(cloudLocations = []) {
       continue;
     }
 
+    // Sigurno dekriptovanje i pretvaranje koordinata u brojeve
     const decLatRaw = decryptText(cloudLoc.lat);
     const decLngRaw = decryptText(cloudLoc.lng);
 
-    let parsedLat = parseFloat(decLatRaw);
-    let parsedLng = parseFloat(decLngRaw);
+    let parsedLat = Number(decLatRaw);
+    let parsedLng = Number(decLngRaw);
 
-    if (isNaN(parsedLat)) parsedLat = parseFloat(cloudLoc.lat);
-    if (isNaN(parsedLng)) parsedLng = parseFloat(cloudLoc.lng);
+    if (isNaN(parsedLat)) parsedLat = Number(cloudLoc.lat);
+    if (isNaN(parsedLng)) parsedLng = Number(cloudLoc.lng);
 
     // Dekripcija slika
     let decryptedImages = [];
@@ -252,7 +256,7 @@ export async function mergeLocations(cloudLocations = []) {
       }
     }
 
-    // Dekripcija priloženih dokumenata (i sadržaja i naziva fajla)
+    // Dekripcija priloženih dokumenata
     let decryptedDocs = [];
     if (cloudLoc.documents_data && cloudLoc.documents_data.length > 0) {
       try {
