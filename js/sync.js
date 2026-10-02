@@ -3,29 +3,41 @@ import { getLocations, saveLocation, mergeLocations } from './db.js';
 import { encryptText, encryptMediaBase64, getSecretKey } from './crypto.js';
 import { showToast } from './ui.js';
 
-// Prebacivanje uploada u Cloud Storage
+function isEncryptedFormat(str) {
+  if (!str) return false;
+  return typeof str === 'string' && (str.startsWith('U2FsdGVkX1') || (str.length > 100 && !str.includes(' ')));
+}
+
 async function uploadMediaToStorage(userId, locationId, mediaBase64, folder = 'images') {
   if (!mediaBase64) return null;
 
+  // Ako je već prebačeno na cloud storage (URL), vraćamo ga direktno
+  if (typeof mediaBase64 === 'string' && mediaBase64.startsWith('http')) {
+    return mediaBase64;
+  }
+
   const blob = encryptMediaBase64(mediaBase64);
-  if (!blob) return null;
+  if (!blob) {
+    console.error(`[SYNC ERROR] Enkripcija medija nije uspjela za folder: ${folder}`);
+    return null;
+  }
 
   const fileName = `${userId}/${locationId}/${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.enc`;
 
   const { data, error } = await supabase.storage
-    .from('location_media')
+    .from('location-images')
     .upload(fileName, blob, {
-      contentType: 'text/plain',
+      contentType: 'application/octet-stream',
       upsert: true
     });
 
   if (error) {
-    console.error(`Greška pri uploadu ${folder}:`, error);
+    console.error(`[STORAGE ERROR] Neuspješan upload (${folder}):`, error);
     return null;
   }
 
   const { data: publicUrlData } = supabase.storage
-    .from('location_media')
+    .from('location-images')
     .getPublicUrl(fileName);
 
   return publicUrlData.publicUrl;
@@ -54,16 +66,28 @@ export async function syncLocationsWithCloud() {
     const locations = await getLocations();
     const unsynced = locations.filter(l => !l.synced);
 
+    if (unsynced.length === 0) {
+      await downloadLocationsFromCloud();
+      showToast("Sve lokacije su već sinhronizovane.", "success");
+      return;
+    }
+
+    let hasErrors = false;
+
     for (const loc of unsynced) {
+      console.log(`[SYNC] Pokušaj sinhronizacije za lokaciju ID: ${loc.id}`);
+      let uploadFailed = false;
+
       // 1. Upload slika
       let imageUrls = [];
       if (loc.images && loc.images.length > 0) {
         for (const imgBase64 of loc.images) {
-          if (imgBase64.startsWith('http')) {
-            imageUrls.push(imgBase64);
+          const url = await uploadMediaToStorage(user.id, loc.id, imgBase64, 'images');
+          if (url) {
+            imageUrls.push(url);
           } else {
-            const url = await uploadMediaToStorage(user.id, loc.id, imgBase64, 'images');
-            if (url) imageUrls.push(url);
+            console.warn(`[SYNC WARNING] Slika za lokaciju ${loc.id} nije prenesena.`);
+            uploadFailed = true;
           }
         }
       }
@@ -71,10 +95,10 @@ export async function syncLocationsWithCloud() {
       // 2. Upload audio zapisa
       let audioUrl = null;
       if (loc.audio) {
-        if (loc.audio.startsWith('http')) {
-          audioUrl = loc.audio;
-        } else {
-          audioUrl = await uploadMediaToStorage(user.id, loc.id, loc.audio, 'audio');
+        audioUrl = await uploadMediaToStorage(user.id, loc.id, loc.audio, 'audio');
+        if (!audioUrl && !loc.audio.startsWith('http')) {
+          console.warn(`[SYNC WARNING] Audio za lokaciju ${loc.id} nije prenesen.`);
+          uploadFailed = true;
         }
       }
 
@@ -82,21 +106,25 @@ export async function syncLocationsWithCloud() {
       let docsData = [];
       if (loc.documents && loc.documents.length > 0) {
         for (const doc of loc.documents) {
-          if (doc.data.startsWith('http')) {
-            docsData.push(doc);
+          const docUrl = await uploadMediaToStorage(user.id, loc.id, doc.data, 'documents');
+          if (docUrl) {
+            const encName = isEncryptedFormat(doc.name) ? doc.name : encryptText(doc.name);
+            docsData.push({ name: encName, data: docUrl });
           } else {
-            const docUrl = await uploadMediaToStorage(user.id, loc.id, doc.data, 'documents');
-            if (docUrl) {
-              const encName = encryptText(doc.name);
-              docsData.push({ name: encName, data: docUrl });
-            }
+            console.warn(`[SYNC WARNING] Dokument ${doc.name} za lokaciju ${loc.id} nije prenesen.`);
+            uploadFailed = true;
           }
         }
       }
 
+      if (uploadFailed) {
+        hasErrors = true;
+        continue; // Preskačemo upis u bazu za ovu lokaciju dok se medij ne popravi
+      }
+
       // Enkripcija tekstualnih podataka
-      const encTitle = encryptText(loc.title);
-      const encDesc = encryptText(loc.description);
+      const encTitle = encryptText(loc.title || 'Bez naslova');
+      const encDesc = encryptText(loc.description || '');
       const encLat = encryptText(String(loc.lat));
       const encLng = encryptText(String(loc.lng));
 
@@ -118,16 +146,24 @@ export async function syncLocationsWithCloud() {
         .upsert(payload, { onConflict: 'id' });
 
       if (error) {
-        console.error("Greška pri slanju na Supabase:", error);
+        console.error(`[DATABASE ERROR] Greška pri upsert-u u tabelu 'locations' za ID ${loc.id}:`, error);
+        hasErrors = true;
       } else {
+        console.log(`[SYNC SUCCESS] Lokacija ID ${loc.id} uspjeno sinhronizovana.`);
         await saveLocation({ ...loc, synced: true });
       }
     }
 
     await downloadLocationsFromCloud();
-    showToast("Sinhronizacija uspješno završena!", "success");
+
+    if (hasErrors) {
+      showToast("Sinhronizacija djelomično završena uz greške. Provjerite konzolu.", "error");
+    } else {
+      showToast("Sinhronizacija uspješno završena!", "success");
+    }
+
   } catch (e) {
-    console.error("Sinhronizacija neuspješna:", e);
+    console.error("[FATAL SYNC ERROR]:", e);
     showToast("Greška pri sinhronizaciji.", "error");
   }
 }
@@ -150,14 +186,14 @@ export async function downloadLocationsFromCloud() {
       .eq('user_id', user.id);
 
     if (error) {
-      console.error("Greška pri preuzimanju sa Supabase-a:", error);
+      console.error("[DOWNLOAD ERROR] Greška pri preuzimanju sa Supabase-a:", error);
       return;
     }
 
-    if (data) {
+    if (data && data.length > 0) {
       await mergeLocations(data);
     }
   } catch (e) {
-    console.error("Greška pri preuzimanju sa clouda:", e);
+    console.error("[DOWNLOAD FATAL ERROR]:", e);
   }
 }
