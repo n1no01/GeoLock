@@ -1,18 +1,20 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getLocations } from './db.js';
-import * as mgrs from 'mgrs';
-
-// Uvoz geokodera i njegovih stilova
-import 'leaflet-control-geocoder';
+import './leaflet-global.js'; // mora prije markercluster-a
+import 'leaflet.markercluster';
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
+import { geocoder } from 'leaflet-control-geocoder';
 import 'leaflet-control-geocoder/dist/Control.Geocoder.css';
+import { getLocations } from './db.js';
+import { isValidLatLng } from './utils.js';
 
-// 🛠️ ISPRAVAK IKONA: Pouzdan uvoz ikona za Vite / Webpack bundlere
+// Pouzdan uvoz ikona za Vite
 const markerIcon = new URL('leaflet/dist/images/marker-icon.png', import.meta.url).href;
 const markerIconRetina = new URL('leaflet/dist/images/marker-icon-2x.png', import.meta.url).href;
 const markerShadow = new URL('leaflet/dist/images/marker-shadow.png', import.meta.url).href;
 
-const DefaultIcon = L.icon({
+L.Marker.prototype.options.icon = L.icon({
   iconUrl: markerIcon,
   iconRetinaUrl: markerIconRetina,
   shadowUrl: markerShadow,
@@ -22,207 +24,152 @@ const DefaultIcon = L.icon({
   shadowSize: [41, 41]
 });
 
-L.Marker.prototype.options.icon = DefaultIcon;
-
 let map = null;
 let markersGroup = null;
 let previewMarker = null;
 let gpsCircle = null;
-
 let streetTiles = null;
 let satelliteTiles = null;
 let isSatellite = false;
+let pickCallback = null;
+let detailsCallback = null;
+let updateToken = 0;
 
-export function initMap(onMapClickCallback) {
-  // 🗺️ Standardni sloj (OpenStreetMap)
+/**
+ * @param onPick     (lat, lng) kad korisnik klikne na mapu ili prevuče pin
+ * @param onDetails  (locationId) kad korisnik klikne "Detalji" u popupu
+ */
+export function initMap({ onPick, onDetails } = {}) {
+  pickCallback = onPick;
+  detailsCallback = onDetails;
+
   streetTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
-    attribution: '© OpenStreetMap'
+    crossOrigin: true, // CORS odgovori (ne "opaque") -> ispravan offline keš bez prevelikog zauzeća kvote
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> suradnici'
   });
 
-  // 🛰️ Satelitski sloj (Esri World Imagery)
   satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 18,
     minZoom: 1,
-    attribution: 'Tiles © Esri',
     crossOrigin: true,
+    attribution: 'Tiles © Esri',
     detectRetina: true
   });
 
-  // Inicijalizacija mape
-  map = L.map('map', {
-    center: [44.0, 17.8],
-    zoom: 7,
-    layers: [streetTiles]
-  });
+  map = L.map('map', { center: [44.0, 17.8], zoom: 7, layers: [streetTiles] });
 
-  L.Control.geocoder({
-    defaultMarkGeocode: true,
-    placeholder: "Pretraži lokaciju ili adresu..."
-  }).addTo(map);
-
-  // 🎛️ Custom Toggle kontrola
+  geocoder({ defaultMarkGeocode: true, placeholder: 'Pretraži lokaciju ili adresu...' }).addTo(map);
   addMapToggleControl();
 
-  markersGroup = L.layerGroup().addTo(map);
+  // Klasteri: bez njih je mapa neupotrebljiva sa stotinama tačaka
+  markersGroup = L.markerClusterGroup({ maxClusterRadius: 50, showCoverageOnHover: false }).addTo(map);
 
-  // 📍 Klik na mapu
   map.on('click', (e) => {
     const { lat, lng } = e.latlng;
-    
-    // 1. Prikazi privremeni marker odmah
     previewLocation(lat, lng);
-
-    // 2. Pozovi callback iz app.js da ažurira input polja
-    if (typeof onMapClickCallback === 'function') {
-      onMapClickCallback(lat, lng);
-    }
+    pickCallback?.(lat, lng);
   });
 
-  updateMapMarkers();
-}
-
-export function parseLocationInput(input) {
-  if (!input || typeof input !== 'string') return null;
-  
-  const trimmed = input.trim();
-
-  try {
-    const lngLat = mgrs.toPoint(trimmed);
-    return {
-      lat: lngLat[1],
-      lng: lngLat[0],
-      type: 'mgrs'
-    };
-  } catch (e) {
-    const parts = trimmed.split(',');
-    if (parts.length === 2) {
-      const lat = parseFloat(parts[0]);
-      const lng = parseFloat(parts[1]);
-      if (!isNaN(lat) && !isNaN(lng)) {
-        return { lat, lng, type: 'dec' };
-      }
-    }
-    return null;
-  }
+  return updateMapMarkers();
 }
 
 function addMapToggleControl() {
   const ToggleControl = L.Control.extend({
     options: { position: 'topright' },
-
-    onAdd: function () {
+    onAdd() {
       const container = L.DomUtil.create('div', 'leaflet-control-layers leaflet-bar');
       const link = L.DomUtil.create('a', 'leaflet-control-layers-toggle', container);
-      
       link.href = '#';
       link.title = 'Prebaci sloj mape';
+      link.setAttribute('role', 'button');
+      link.setAttribute('aria-label', 'Prebaci između mape i satelitskog prikaza');
 
       L.DomEvent.disableClickPropagation(container);
       L.DomEvent.disableScrollPropagation(container);
 
       L.DomEvent.on(link, 'click', (e) => {
         L.DomEvent.preventDefault(e);
-
         if (isSatellite) {
-          if (map.hasLayer(satelliteTiles)) map.removeLayer(satelliteTiles);
-          if (!map.hasLayer(streetTiles)) map.addLayer(streetTiles);
-          isSatellite = false;
+          map.removeLayer(satelliteTiles);
+          map.addLayer(streetTiles);
         } else {
-          if (map.hasLayer(streetTiles)) map.removeLayer(streetTiles);
-          if (!map.hasLayer(satelliteTiles)) map.addLayer(satelliteTiles);
-          isSatellite = true;
+          map.removeLayer(streetTiles);
+          map.addLayer(satelliteTiles);
         }
-
-        setTimeout(() => {
-          map.invalidateSize();
-        }, 100);
+        isSatellite = !isSatellite;
+        setTimeout(() => map.invalidateSize(), 100);
       });
-
       return container;
     }
   });
-
   map.addControl(new ToggleControl());
+}
+
+function buildPopup(loc) {
+  const box = document.createElement('div');
+  const title = document.createElement('b');
+  title.textContent = loc.title || 'Bez naslova';
+  const desc = document.createElement('div');
+  desc.textContent = loc.description || '';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn btn-small';
+  btn.textContent = 'Detalji';
+  btn.addEventListener('click', () => detailsCallback?.(loc.id));
+  box.append(title, desc, document.createElement('br'), btn);
+  return box;
 }
 
 export async function updateMapMarkers() {
   if (!map || !markersGroup) return;
+  const token = ++updateToken;
+  const locations = await getLocations();
+  if (token !== updateToken) return; // pristigao je noviji poziv
 
   markersGroup.clearLayers();
-  const locations = await getLocations();
-
-  locations.forEach(loc => {
-    const lat = parseFloat(loc.lat);
-    const lng = parseFloat(loc.lng);
-
-    if (!isNaN(lat) && !isNaN(lng) && lat !== null && lng !== null) {
-      const marker = L.marker([lat, lng]);
-      marker.bindPopup(`
-        <b>${loc.title || 'Bez naslova'}</b><br>
-        ${loc.description || ''}<br><br>
-        <button onclick="openModal('${loc.id}')" class="btn" style="padding:2px 6px; font-size:11px;">Detalji</button>
-      `);
-      markersGroup.addLayer(marker);
-    }
-  });
+  const markers = [];
+  for (const loc of locations) {
+    const lat = Number(loc.lat);
+    const lng = Number(loc.lng);
+    if (!isValidLatLng(lat, lng)) continue;
+    markers.push(L.marker([lat, lng], { title: loc.title }).bindPopup(buildPopup(loc)));
+  }
+  markersGroup.addLayers(markers);
 }
 
 export function centerMap(lat, lng, zoom = 15) {
-  const parsedLat = parseFloat(lat);
-  const parsedLng = parseFloat(lng);
-
-  if (map && !isNaN(parsedLat) && !isNaN(parsedLng)) {
-    map.setView([parsedLat, parsedLng], zoom);
-  }
+  const la = parseFloat(lat);
+  const ln = parseFloat(lng);
+  if (map && isValidLatLng(la, ln)) map.setView([la, ln], zoom);
 }
 
 export function previewLocation(lat, lng) {
   if (!map) return;
-
-  const parsedLat = parseFloat(lat);
-  const parsedLng = parseFloat(lng);
-
-  if (isNaN(parsedLat) || isNaN(parsedLng)) return;
+  const la = parseFloat(lat);
+  const ln = parseFloat(lng);
+  if (!isValidLatLng(la, ln)) return;
 
   if (previewMarker) {
-    previewMarker.setLatLng([parsedLat, parsedLng]);
+    previewMarker.setLatLng([la, ln]);
   } else {
-    // Postavljen opacity: 1 da se pin jasno vidi
-    previewMarker = L.marker([parsedLat, parsedLng], { 
-      opacity: 1,
-      draggable: true 
-    }).addTo(map);
-
-    // Omogućeno prevlačenje pina za precizno namještanje
+    previewMarker = L.marker([la, ln], { opacity: 1, draggable: true }).addTo(map);
     previewMarker.on('dragend', (e) => {
       const pos = e.target.getLatLng();
-      const latInput = document.getElementById('lat');
-      const lngInput = document.getElementById('lng');
-      if (latInput && lngInput) {
-        latInput.value = pos.lat.toFixed(6);
-        lngInput.value = pos.lng.toFixed(6);
-        latInput.dispatchEvent(new Event('input'));
-      }
+      pickCallback?.(pos.lat, pos.lng);
     });
   }
-
-  map.panTo([parsedLat, parsedLng]);
+  map.panTo([la, ln]);
 }
 
 export function addGpsCircle(lat, lng, accuracy) {
   if (!map) return;
+  const la = parseFloat(lat);
+  const ln = parseFloat(lng);
+  if (!isValidLatLng(la, ln)) return;
 
-  const parsedLat = parseFloat(lat);
-  const parsedLng = parseFloat(lng);
-
-  if (isNaN(parsedLat) || isNaN(parsedLng)) return;
-
-  if (gpsCircle) {
-    map.removeLayer(gpsCircle);
-  }
-
-  gpsCircle = L.circle([parsedLat, parsedLng], {
+  if (gpsCircle) map.removeLayer(gpsCircle);
+  gpsCircle = L.circle([la, ln], {
     radius: accuracy || 10,
     color: '#2563eb',
     fillColor: '#3b82f6',
@@ -230,10 +177,12 @@ export function addGpsCircle(lat, lng, accuracy) {
   }).addTo(map);
 }
 
+/** Ukloni privremeni pin i krug tačnosti (npr. nakon snimanja lokacije). */
+export function clearPreview() {
+  if (previewMarker) { map?.removeLayer(previewMarker); previewMarker = null; }
+  if (gpsCircle) { map?.removeLayer(gpsCircle); gpsCircle = null; }
+}
+
 export function invalidateMapSize() {
-  if (map) {
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 200);
-  }
+  if (map) setTimeout(() => map.invalidateSize(), 200);
 }

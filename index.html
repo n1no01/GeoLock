@@ -2,13 +2,15 @@
 <html lang="bs">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <!-- Zumiranje je namjerno dozvoljeno (WCAG 1.4.4); font-size 16px na poljima sprječava iOS auto-zoom -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="GeoLock - offline terenska evidencija lokacija sa end-to-end enkripcijom">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>GeoLock</title>
 
   <!-- PWA PODRŠKA ZASLONA -->
   <meta name="theme-color" content="#0f172a">
   <meta name="mobile-web-app-capable" content="yes">
-  
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="GeoLock">
@@ -18,104 +20,101 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
   <link rel="stylesheet" href="/css/styles.css" />
-  <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
 </head>
 <body>
+
+<a href="#sidebar-add" class="skip-link">Preskoči na formu za unos</a>
 
 <header>
   <h1>GeoLock</h1>
   <div class="header-right">
-    <div class="nav-tabs">
-      <button id="tabMapBtn" class="tab-btn active">Mapa</button>
-      <button id="tabListBtn" class="tab-btn">Lista (<span id="tab-count">0</span>)</button>
+    <div class="nav-tabs" role="tablist" aria-label="Prikaz">
+      <button type="button" id="tabMapBtn" class="tab-btn active" role="tab" aria-selected="true" aria-controls="map-view">Mapa</button>
+      <button type="button" id="tabListBtn" class="tab-btn" role="tab" aria-selected="false" aria-controls="list-view">Lista (<span id="tab-count">0</span>)</button>
     </div>
 
-    <!-- DUGME/STATUS ZA BIOMETRIJU U HEADERU -->
-    <div id="bioHeaderContainer" style="display: none;">
-      <button id="enableBioHeaderBtn" class="auth-btn" style="background: #334155; border: 1px solid #475569; font-size: 11px;">
-        👆 Omogući Biometriju
-      </button>
-    </div>
-
-    <span id="syncStatus" class="sync-status">🔒 Lokalni rad</span>
-    <button id="authBtn" class="auth-btn">Prijava</button>
+    <span id="syncStatus" class="sync-status" role="status">🔒 Lokalni rad</span>
+    <button type="button" id="lockBtn" class="auth-btn auth-btn-muted" title="Zaključaj aplikaciju" aria-label="Zaključaj aplikaciju" hidden>🔒</button>
+    <button type="button" id="securityBtn" class="auth-btn auth-btn-muted" title="Sigurnost" aria-label="Sigurnosne postavke" hidden>⚙️</button>
+    <button type="button" id="authBtn" class="auth-btn">Prijava</button>
   </div>
 </header>
 
-<main>
+<main id="appMain">
   <!-- TAB 1: MAPA I UNOS -->
-  <div id="map-view" class="tab-content active" style="position: relative;">
-    <div id="map"></div>
+  <div id="map-view" class="tab-content active" role="tabpanel">
+    <div id="map" role="application" aria-label="Mapa lokacija"></div>
 
     <div id="sidebar-add">
       <button type="button" id="gpsBtn" class="btn btn-gps">
         <span>📍 Očitaj trenutnu GPS lokaciju</span>
       </button>
-      <div id="gpsStatus" class="gps-status"></div>
+      <div id="gpsStatus" class="gps-status" role="status" aria-live="polite"></div>
 
       <form id="locationForm">
-        <div style="display: flex; gap: 6px;">
-          <div class="form-group" style="flex:1;">
-            <label>Lat (Širina):</label>
-            <input type="number" step="any" id="lat" required placeholder="44.538">
+        <div class="form-row">
+          <div class="form-group grow">
+            <label for="lat">Lat (Širina):</label>
+            <input type="number" step="any" min="-90" max="90" id="lat" required placeholder="44.538" inputmode="decimal">
           </div>
-          <div class="form-group" style="flex:1;">
-            <label>Lng (Dužina):</label>
-            <input type="number" step="any" id="lng" required placeholder="18.667">
+          <div class="form-group grow">
+            <label for="lng">Lng (Dužina):</label>
+            <input type="number" step="any" min="-180" max="180" id="lng" required placeholder="18.667" inputmode="decimal">
           </div>
         </div>
         <div class="form-group">
-          <label>MGRS Oznaka:</label>
-          <input type="text" id="mgrsInput" placeholder="npr. 34T CJ 12345 67890">
+          <label for="mgrsInput">MGRS oznaka:</label>
+          <input type="text" id="mgrsInput" placeholder="npr. 34T CJ 12345 67890" autocomplete="off" autocapitalize="characters" spellcheck="false">
         </div>
         <div class="form-group">
-          <label>Naziv / Oznaka:</label>
-          <input type="text" id="title" required placeholder="npr. Lokacija Teren 1">
+          <label for="title">Naziv / oznaka:</label>
+          <input type="text" id="title" required maxlength="200" placeholder="npr. Lokacija Teren 1">
         </div>
         <div class="form-group">
-          <label>Opis i bilješke:</label>
+          <label for="description">Opis i bilješke:</label>
           <textarea id="description" rows="2" placeholder="Pristupni put, stanje na terenu, zabilješke..."></textarea>
         </div>
 
         <div class="audio-recorder">
-          <label style="font-size:11px; font-weight:600; color:#475569;">Glasovna bilješka:</label>
+          <span class="field-label">Glasovna bilješka:</span>
           <div class="audio-ctrls">
             <button type="button" id="recordBtn" class="btn btn-record">
               <span>🎙️ Snimi glasovnu bilješku</span>
             </button>
           </div>
-          <div id="recordTimer" style="font-size: 11px; color: #dc2626; font-weight: bold; text-align: center; display: none;">Snimanje u toku: <span id="timerVal">00:00</span></div>
-          <audio id="audioPreview" class="audio-preview" controls style="display: none;"></audio>
+          <div id="recordTimer" class="record-timer" hidden>Snimanje u toku: <span id="timerVal">00:00</span></div>
+          <audio id="audioPreview" class="audio-preview" controls hidden></audio>
         </div>
 
         <div class="form-group">
-          <label>Fotografije s terena:</label>
+          <label for="imageInput">Fotografije s terena:</label>
           <input type="file" id="imageInput" accept="image/*" multiple>
         </div>
 
-        <!-- UNOS DOKUMENATA (PDF, WORD, EXCEL) -->
         <div class="form-group">
-          <label>Priloženi dokumenti (PDF, Word, Excel):</label>
+          <label for="documentInput">Priloženi dokumenti (PDF, Word, Excel):</label>
           <input type="file" id="documentInput" accept=".pdf,.doc,.docx,.xls,.xlsx" multiple>
         </div>
 
-        <button type="submit" class="btn" style="width: 100%;">Sačuvaj Lokaciju</button>
+        <button type="submit" class="btn">Sačuvaj lokaciju</button>
       </form>
     </div>
   </div>
 
   <!-- TAB 2: DETALJNA LISTA -->
-  <div id="list-view" class="tab-content">
+  <div id="list-view" class="tab-content" role="tabpanel">
     <div class="controls-bar">
-      <input type="text" id="searchInput" placeholder="Pretraži unose..." style="padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px;">
-      <div style="display: flex; gap: 6px;">
-        <select id="sortSelect" style="padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; flex: 1;">
+      <label for="searchInput" class="sr-only">Pretraži unose</label>
+      <input type="search" id="searchInput" class="control-input" placeholder="Pretraži unose...">
+      <div class="controls-actions">
+        <label for="sortSelect" class="sr-only">Sortiranje</label>
+        <select id="sortSelect" class="control-input grow">
           <option value="newest">Najnovije</option>
           <option value="oldest">Najstarije</option>
           <option value="title_asc">Naziv (A-Z)</option>
         </select>
-        <button id="exportGeoJsonBtn" class="btn btn-secondary" style="padding: 6px 10px;">GeoJSON</button>
-        <button id="exportCsvBtn" class="btn btn-secondary" style="padding: 6px 10px;">CSV</button>
+        <button type="button" id="exportGeoJsonBtn" class="btn btn-secondary btn-small">GeoJSON</button>
+        <button type="button" id="exportCsvBtn" class="btn btn-secondary btn-small">CSV</button>
       </div>
     </div>
 
@@ -124,120 +123,181 @@
 </main>
 
 <!-- MODAL ZA DETALJE -->
-<div id="detailsModal" class="modal-backdrop">
+<div id="detailsModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
   <div class="modal-content">
     <div class="modal-header">
-      <h2 id="modalTitle">Naziv Lokacije</h2>
-      <button class="close-btn" onclick="document.getElementById('detailsModal').classList.remove('open')">&times;</button>
+      <h2 id="modalTitle">Naziv lokacije</h2>
+      <button type="button" class="close-btn" data-close-modal="detailsModal" aria-label="Zatvori">&times;</button>
     </div>
     <div class="modal-body">
-      <div style="background:#f1f5f9; padding:6px 10px; border-radius:6px; font-family:monospace; font-size:12px; margin-bottom:10px;" id="modalCoords"></div>
-      <div style="font-size:13px; line-height:1.5; margin-bottom:15px; white-space:pre-wrap;" id="modalDesc"></div>
+      <div class="coords-box" id="modalCoords"></div>
+      <div class="muted small" id="modalDates"></div>
+      <div class="modal-desc" id="modalDesc"></div>
 
-      <div id="modalAudioContainer" style="margin-bottom: 15px; display: none; background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
-        <h4 style="margin: 0 0 6px 0; font-size:13px; color:#475569;">🔊 Glasovna bilješka:</h4>
-        <audio id="modalAudioPlayer" controls style="width: 100%;"></audio>
+      <div id="modalAudioContainer" class="audio-box" hidden>
+        <h4 class="section-title">🔊 Glasovna bilješka:</h4>
+        <audio id="modalAudioPlayer" controls class="full-width"></audio>
       </div>
 
-      <!-- PRIKAZ DOKUMENATA U MODALU -->
-      <div id="modalDocsContainer" style="margin-bottom: 15px;"></div>
+      <div id="modalDocsContainer" class="docs-box"></div>
 
-      <h4 style="margin: 10px 0 6px 0; font-size:13px; color:#475569;">Slike (<span id="modalImageCount">0</span>):</h4>
+      <h4 class="section-title">Slike (<span id="modalImageCount">0</span>):</h4>
       <div class="modal-gallery" id="modalGallery"></div>
 
-      <div style="margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
-        <button id="modalDocxBtn" class="btn btn-secondary" style="flex:1;">DOCX Izvještaj</button>
-        <button id="modalEditBtn" class="btn btn-warning" style="flex:1;">Uredi</button>
-        <button id="modalMapBtn" class="btn" style="flex:1;">Mapa</button>
-        <button id="modalDeleteBtn" class="btn btn-danger" style="flex:1;">Obriši</button>
+      <div class="modal-actions">
+        <button type="button" id="modalDocxBtn" class="btn btn-secondary">DOCX izvještaj</button>
+        <button type="button" id="modalEditBtn" class="btn btn-warning">Uredi</button>
+        <button type="button" id="modalMapBtn" class="btn">Mapa</button>
+        <button type="button" id="modalDeleteBtn" class="btn btn-danger">Obriši</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- MODAL ZA EDIT -->
-<div id="editModal" class="modal-backdrop">
+<!-- MODAL ZA IZMJENU -->
+<div id="editModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="editModalTitle" aria-hidden="true">
   <div class="modal-content">
     <div class="modal-header">
-      <h2>Uredi Lokaciju</h2>
-      <button class="close-btn" onclick="document.getElementById('editModal').classList.remove('open')">&times;</button>
+      <h2 id="editModalTitle">Uredi lokaciju</h2>
+      <button type="button" class="close-btn" data-close-modal="editModal" aria-label="Zatvori">&times;</button>
     </div>
     <div class="modal-body">
       <form id="editForm">
         <input type="hidden" id="editId">
-        <div style="display: flex; gap: 6px;">
-          <div class="form-group" style="flex:1;"><label>Lat:</label><input type="number" step="any" id="editLat" required></div>
-          <div class="form-group" style="flex:1;"><label>Lng:</label><input type="number" step="any" id="editLng" required></div>
+        <div class="form-row">
+          <div class="form-group grow"><label for="editLat">Lat:</label><input type="number" step="any" min="-90" max="90" id="editLat" required inputmode="decimal"></div>
+          <div class="form-group grow"><label for="editLng">Lng:</label><input type="number" step="any" min="-180" max="180" id="editLng" required inputmode="decimal"></div>
         </div>
 
-        <!-- MGRS POLJE U MODALU ZA UREĐIVANJE -->
         <div class="form-group">
-          <label>MGRS Oznaka:</label>
-          <input type="text" id="editMgrsInput" placeholder="npr. 34T CJ 12345 67890">
+          <label for="editMgrsInput">MGRS oznaka:</label>
+          <input type="text" id="editMgrsInput" placeholder="npr. 34T CJ 12345 67890" autocomplete="off" autocapitalize="characters" spellcheck="false">
         </div>
 
-        <div class="form-group"><label>Naziv:</label><input type="text" id="editTitle" required></div>
-        <div class="form-group"><label>Opis:</label><textarea id="editDescription" rows="3"></textarea></div>
-        <div class="form-group"><label>Slike:</label><div id="editExistingGallery" class="modal-gallery"></div></div>
-        <div class="form-group"><label>Dodaj nove slike:</label><input type="file" id="editNewImages" accept="image/*" multiple></div>
+        <div class="form-group"><label for="editTitle">Naziv:</label><input type="text" id="editTitle" required maxlength="200"></div>
+        <div class="form-group"><label for="editDescription">Opis:</label><textarea id="editDescription" rows="3"></textarea></div>
+        <div class="form-group"><span class="field-label">Slike:</span><div id="editExistingGallery" class="modal-gallery"></div></div>
+        <div class="form-group"><label for="editNewImages">Dodaj nove slike:</label><input type="file" id="editNewImages" accept="image/*" multiple></div>
 
-        <!-- UREĐIVANJE DOKUMENATA U MODALU -->
         <div class="form-group">
-          <label>Postojeći dokumenti:</label>
-          <div id="editExistingDocs" style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;"></div>
+          <span class="field-label">Postojeći dokumenti:</span>
+          <div id="editExistingDocs" class="edit-docs"></div>
         </div>
         <div class="form-group">
-          <label>Dodaj nove dokumente:</label>
+          <label for="editNewDocs">Dodaj nove dokumente:</label>
           <input type="file" id="editNewDocs" accept=".pdf,.doc,.docx,.xls,.xlsx" multiple>
         </div>
 
-        <div style="margin-top: 15px; display: flex; gap: 8px;">
-          <button type="button" class="btn btn-secondary" onclick="document.getElementById('editModal').classList.remove('open')" style="flex:1;">Odustani</button>
-          <button type="submit" class="btn" style="flex:1;">Sačuvaj</button>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" data-close-modal="editModal">Odustani</button>
+          <button type="submit" class="btn">Sačuvaj</button>
         </div>
       </form>
     </div>
   </div>
 </div>
 
-<!-- MODAL ZA PRIJAVU I BIOMETRIJU -->
-<div id="authModal" class="modal-backdrop">
-  <div class="modal-content" style="max-width: 380px;">
+<!-- MODAL ZA PRIJAVU / OTKLJUČAVANJE -->
+<div id="authModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="authTitle" aria-hidden="true">
+  <div class="modal-content modal-narrow">
     <div class="modal-header">
-      <h2 id="authTitle">Korisnička Prijava</h2>
+      <h2 id="authTitle">Korisnička prijava</h2>
+      <button type="button" class="close-btn" id="authCloseBtn" data-close-modal="authModal" aria-label="Zatvori" hidden>&times;</button>
     </div>
     <div class="modal-body">
-      <div id="bioFastLoginContainer" style="display: none; margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px solid #e2e8f0;">
-        <button type="button" id="bioFastLoginBtn" class="btn" style="width: 100%; background: #0f172a; color: #ffffff; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px;">
-          <span>👆 Brza Prijava (Otisak / FaceID)</span>
+      <div id="bioFastLoginContainer" class="bio-box" hidden>
+        <button type="button" id="bioFastLoginBtn" class="btn btn-dark">
+          <span>👆 Otključaj otiskom / licem</span>
         </button>
       </div>
 
+      <p id="authHint" class="muted small" hidden></p>
+
       <form id="authForm">
-        <div class="form-group">
-          <label>Email adresa:</label>
-          <input type="email" id="authEmail" required placeholder="korisnik@email.com">
+        <div class="form-group" id="authEmailGroup">
+          <label for="authEmail">Email adresa:</label>
+          <input type="email" id="authEmail" required placeholder="korisnik@email.com" autocomplete="username email" autocapitalize="none" spellcheck="false">
         </div>
         <div class="form-group">
-          <label>Lozinka:</label>
-          <input type="password" id="authPassword" required placeholder="••••••••">
+          <label for="authPassword">Lozinka:</label>
+          <input type="password" id="authPassword" required placeholder="••••••••" minlength="1" autocomplete="current-password">
+          <div id="authPasswordHelp" class="muted small" hidden>Najmanje 10 znakova. Ista lozinka štiti i vaše šifrovane podatke.</div>
         </div>
-        <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 10px;">
-          <input type="checkbox" id="rememberMe" checked style="width: auto; cursor: pointer;">
-          <label for="rememberMe" style="font-size: 12px; cursor: pointer; margin: 0; color: #475569;">Zapamti me na ovom uređaju</label>
+        <div class="form-group form-check" id="rememberMeGroup">
+          <input type="checkbox" id="rememberMe" checked>
+          <label for="rememberMe">Zapamti me na ovom uređaju</label>
         </div>
 
-        <button type="submit" id="authSubmitBtn" class="btn" style="width: 100%; margin-top: 10px;">Prijavi se</button>
+        <button type="submit" id="authSubmitBtn" class="btn">Prijavi se</button>
       </form>
 
-      <div style="margin-top: 12px; text-align: center;">
-        <a href="#" id="toggleAuthMode" style="font-size: 12px; color: #2563eb;">Nemate račun? Registrujte se</a>
+      <div class="auth-links">
+        <a href="#" id="toggleAuthMode">Nemate račun? Registrujte se</a>
+        <a href="#" id="forgotPassword">Zaboravljena lozinka?</a>
+        <a href="#" id="authSwitchAccount" hidden>Odjava / drugi račun</a>
       </div>
     </div>
   </div>
 </div>
 
-<div id="toastNotification" class="toast-notification"></div>
-<script type="module" src="js/app.js"></script>
+<!-- MODAL: SIGURNOST -->
+<div id="securityModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="securityTitle" aria-hidden="true">
+  <div class="modal-content modal-narrow">
+    <div class="modal-header">
+      <h2 id="securityTitle">Sigurnost</h2>
+      <button type="button" class="close-btn" data-close-modal="securityModal" aria-label="Zatvori">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="muted small" id="securityAccount"></p>
+      <div class="stack">
+        <button type="button" id="toggleBioBtn" class="btn btn-secondary">Omogući biometriju</button>
+        <button type="button" id="changePasswordBtn" class="btn btn-secondary">Promijeni lozinku</button>
+        <button type="button" id="newRecoveryBtn" class="btn btn-secondary">Novi recovery ključ</button>
+      </div>
+      <p class="muted small">Podaci su šifrovani ključem koji se čuva samo u memoriji dok je aplikacija otključana.
+        Recovery ključ je jedini način povratka podataka ako zaboravite lozinku.</p>
+    </div>
+  </div>
+</div>
+
+<!-- UNIVERZALNI DIJALOG (zamjena za alert / confirm / prompt) -->
+<div id="dialogModal" class="modal-backdrop modal-top" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" aria-hidden="true">
+  <form id="dialogForm" class="modal-content modal-narrow" novalidate>
+    <div class="modal-header"><h2 id="dialogTitle"></h2></div>
+    <div class="modal-body">
+      <p id="dialogMessage" class="dialog-message" hidden></p>
+
+      <div id="dialogReadonlyWrap" class="form-group" hidden>
+        <label for="dialogReadonly" class="sr-only">Vrijednost</label>
+        <textarea id="dialogReadonly" class="mono-box" rows="3" readonly></textarea>
+        <button type="button" id="dialogCopyBtn" class="btn btn-secondary btn-small">Kopiraj</button>
+      </div>
+
+      <div id="dialogInputWrap" class="form-group" hidden>
+        <label for="dialogInput" id="dialogInputLabel"></label>
+        <input id="dialogInput" type="text" autocomplete="off">
+      </div>
+
+      <div id="dialogCheckWrap" class="form-group form-check" hidden>
+        <input type="checkbox" id="dialogCheck">
+        <label for="dialogCheck" id="dialogCheckLabel"></label>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="dialogCancel" class="btn btn-secondary">Odustani</button>
+        <button type="submit" id="dialogOk" class="btn">U redu</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<!-- LIGHTBOX ZA SLIKE -->
+<div id="lightboxModal" class="modal-backdrop lightbox" role="dialog" aria-modal="true" aria-label="Pregled slike" aria-hidden="true">
+  <button type="button" class="close-btn lightbox-close" data-close-modal="lightboxModal" aria-label="Zatvori">&times;</button>
+  <img id="lightboxImg" alt="Uvećana fotografija">
+</div>
+
+<div id="toastNotification" class="toast-notification" role="status" aria-live="polite" aria-atomic="true"></div>
+<script type="module" src="/js/app.js"></script>
 </body>
 </html>

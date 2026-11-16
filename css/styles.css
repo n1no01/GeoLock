@@ -432,3 +432,92 @@ main {
 .map-tool-btn:active {
   background: #f1f5f9;
 }
+
+[hidden] { display: none !important; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+.skip-link {
+  position: absolute; left: 8px; top: -48px; z-index: 100000;
+  background: #2563eb; color: #fff; padding: 8px 12px; border-radius: 6px;
+  text-decoration: none; font-weight: 600; transition: top 0.15s;
+}
+.skip-link:focus { top: 8px; }
+
+/* Vidljiv fokus (ranije je izostajao) */
+:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
+button:focus-visible, .btn:focus-visible { outline-color: #f59e0b; }
+
+/* Zaključana aplikacija: sadržaj je nedostupan (inert) i zamućen */
+main.locked { filter: blur(12px); pointer-events: none; user-select: none; }
+
+.muted { color: #64748b; }
+.small { font-size: 12px; }
+.grow { flex: 1; }
+.full-width { width: 100%; }
+.stack { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+
+.form-row { display: flex; gap: 6px; }
+.form-check { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.form-check input { width: auto; cursor: pointer; }
+.form-check label { margin: 0; cursor: pointer; font-size: 12px; }
+.field-label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+.form-group input[type="file"] { padding: 8px; font-size: 14px; }
+.form-group input:invalid:not(:placeholder-shown):not(:focus) { border-color: #dc2626; }
+
+.btn-small { width: auto; min-height: 36px; padding: 6px 12px; font-size: 12px; }
+.btn-dark { background: #0f172a; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.auth-btn-muted { background: #334155; border: 1px solid #475569; }
+.auth-btn { min-height: 32px; }
+
+.record-timer { font-size: 11px; color: #dc2626; font-weight: bold; text-align: center; }
+.audio-recorder .field-label { font-size: 11px; }
+
+.controls-actions { display: flex; gap: 6px; align-items: center; }
+.control-input { padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px; }
+
+.card-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.card-mgrs { margin-top: -4px; }
+.empty-state { grid-column: 1 / -1; text-align: center; color: #64748b; padding: 32px 0; }
+
+.coords-box { background: #f1f5f9; padding: 6px 10px; border-radius: 6px; font-family: monospace; font-size: 12px; margin-bottom: 6px; word-break: break-word; }
+.modal-desc { font-size: 13px; line-height: 1.5; margin: 10px 0 15px; white-space: pre-wrap; word-break: break-word; }
+.audio-box { margin-bottom: 15px; background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; }
+.docs-box { margin-bottom: 15px; }
+.section-title { margin: 10px 0 6px; font-size: 13px; color: #475569; }
+.modal-actions { margin-top: 18px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.modal-actions .btn { flex: 1; width: auto; min-width: 110px; }
+.modal-narrow { max-width: 400px; }
+.modal-top { z-index: 10001; }
+
+.edit-docs { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.edit-doc-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+.edit-doc-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.gallery-item img { cursor: zoom-in; }
+.delete-img-btn { cursor: pointer; min-width: 28px; min-height: 28px; font-size: 16px; line-height: 1; }
+.doc-download-btn { border: none; cursor: pointer; font-family: inherit; }
+
+.bio-box { margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px solid #e2e8f0; }
+.auth-links { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; text-align: center; font-size: 12px; }
+.auth-links a { color: #2563eb; }
+
+.dialog-message { font-size: 14px; line-height: 1.5; margin: 0 0 12px; white-space: pre-wrap; }
+.mono-box { font-family: monospace; font-size: 15px; letter-spacing: 0.5px; margin-bottom: 8px; word-break: break-all; resize: none; background: #f1f5f9; }
+
+.lightbox { background: rgba(0, 0, 0, 0.92); }
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
+.lightbox-close { position: absolute; top: 12px; right: 16px; color: #fff; font-size: 36px; z-index: 1; }
+
+/* Leaflet: dugmad kontrola dovoljno velika za dodir */
+.marker-cluster div { font-weight: 700; }
+
+.toast-notification { max-width: calc(100vw - 24px); white-space: normal; text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

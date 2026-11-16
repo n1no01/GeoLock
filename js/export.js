@@ -1,176 +1,154 @@
-import { getLocations } from './db.js';
-import * as mgrs from 'mgrs';
+import { getLocations, getLocation } from './db.js';
+import { getMediaBlobEnsured, downloadBlob } from './media.js';
+import { toMgrs } from './coords.js';
+import { csvCell, safeFileName, isValidLatLng } from './utils.js';
+import { showToast } from './toast.js';
 
-function downloadFile(content, fileName, contentType) {
-  const a = document.createElement("a"); 
-  const file = new Blob([content], {type: contentType});
-  a.href = URL.createObjectURL(file); 
-  a.download = fileName; 
-  a.click();
-}
-
-// Pomoćna funkcija za sigurno izračunavanje MGRS-a
-function getMGRS(latRaw, lngRaw) {
-  try {
-    const lat = parseFloat(latRaw);
-    const lng = parseFloat(lngRaw);
-    if (!isNaN(lat) && !isNaN(lng)) {
-      return mgrs.forward([lng, lat], 5);
-    }
-  } catch (e) {
-    console.warn("Greška pri konverziji u MGRS:", e);
-  }
-  return "N/A";
-}
+const mgrsOrNA = (lat, lng) => toMgrs(lat, lng) ?? 'N/A';
 
 export async function exportGeoJSON() {
   try {
-    const locations = await getLocations();
-    const geojson = { 
-      type: "FeatureCollection", 
-      features: locations.map(l => ({ 
-        type: "Feature", 
-        geometry: { type: "Point", coordinates: [l.lng, l.lat] }, 
-        properties: { 
-          title: l.title, 
+    const locations = (await getLocations()).filter((l) => isValidLatLng(l.lat, l.lng));
+    const geojson = {
+      type: 'FeatureCollection',
+      features: locations.map((l) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [l.lng, l.lat] },
+        properties: {
+          id: l.id,
+          title: l.title,
           description: l.description,
-          mgrs: getMGRS(l.lat, l.lng)
-        } 
-      })) 
+          mgrs: mgrsOrNA(l.lat, l.lng),
+          accuracy_m: l.accuracy,
+          created_at: l.createdAt,
+          updated_at: l.updatedAt
+        }
+      }))
     };
-    downloadFile(JSON.stringify(geojson, null, 2), "lokacije.geojson", "application/json");
+    downloadBlob(new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' }), 'lokacije.geojson');
   } catch (err) {
-    console.error("Greška pri izvozu GeoJSON-a:", err);
+    console.error('Greška pri izvozu GeoJSON-a:', err);
+    showToast('Izvoz GeoJSON-a nije uspio.', 'error');
   }
 }
 
 export async function exportCSV() {
   try {
     const locations = await getLocations();
-    let csv = "ID,Naziv,Sirina,Duzina,MGRS,Opis,Slika,Dokumenti,ImAudio\n";
-    locations.forEach(l => { 
-      const mgrsVal = getMGRS(l.lat, l.lng);
-      csv += `${l.id},"${l.title}",${l.lat},${l.lng},"${mgrsVal}","${(l.description||'').replace(/"/g,'""')}",${l.images?l.images.length:0},${l.documents?l.documents.length:0},${l.audio?'DA':'NE'}\n`; 
-    });
-    downloadFile(csv, "lokacije.csv", "text/csv;charset=utf-8;");
+    const header = ['ID', 'Naziv', 'Sirina', 'Duzina', 'MGRS', 'Preciznost_m', 'Opis', 'Slike', 'Dokumenti', 'Audio', 'Zabiljezeno', 'Izmijenjeno'];
+    const rows = locations.map((l) => [
+      csvCell(l.id),
+      csvCell(l.title),
+      l.lat ?? '',
+      l.lng ?? '',
+      csvCell(mgrsOrNA(l.lat, l.lng)),
+      l.accuracy ? Math.round(l.accuracy) : '',
+      csvCell(l.description),
+      l.images.length,
+      l.documents.length,
+      l.audio ? 'DA' : 'NE',
+      csvCell(l.createdAt),
+      csvCell(l.updatedAt)
+    ].join(','));
+
+    // BOM da Excel ispravno prikaže č, ć, š, ž, đ
+    const csv = `\uFEFF${header.join(',')}\r\n${rows.join('\r\n')}\r\n`;
+    downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), 'lokacije.csv');
   } catch (err) {
-    console.error("Greška pri izvozu CSV-a:", err);
+    console.error('Greška pri izvozu CSV-a:', err);
+    showToast('Izvoz CSV-a nije uspio.', 'error');
   }
 }
 
-// Izvoz pojedinačne lokacije u DOCX dokument
+/** Dimenzije slike sa očuvanim omjerom stranica (ranije fiksno 450x300 -> izobličenje). */
+async function fitImage(blob, maxWidth = 450, maxHeight = 600) {
+  const bitmap = await createImageBitmap(blob);
+  const scale = Math.min(1, maxWidth / bitmap.width, maxHeight / bitmap.height);
+  const size = { width: Math.round(bitmap.width * scale), height: Math.round(bitmap.height * scale) };
+  bitmap.close?.();
+  return size;
+}
+
 export async function exportSingleLocationToDocx(locationId) {
   try {
-    const locations = await getLocations();
-    const loc = locations.find(l => String(l.id) === String(locationId));
+    const loc = await getLocation(locationId);
     if (!loc) return;
 
-    if (!window.docx) {
-      console.error("docx biblioteka nije učitana u HTML-u.");
-      return;
-    }
+    // docx je veliki paket pa se učitava tek kad zatreba (i dolazi iz npm-a, ne sa CDN-a)
+    const {
+      Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, ImageRun, HeadingLevel, WidthType
+    } = await import('docx');
 
-    const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, ImageRun, HeadingLevel, WidthType } = window.docx;
+    const cell = (text, bold = false) => new TableCell({
+      children: [new Paragraph({ children: [new TextRun({ text: String(text), bold })] })]
+    });
+    const fmt = (iso) => (iso ? new Date(iso).toLocaleString('bs') : 'Nije zabilježeno');
 
-    const mgrsString = getMGRS(loc.lat, loc.lng);
-
-    const docChildren = [
+    const children = [
+      new Paragraph({ text: 'TERENSKI IZVJEŠTAJ - GEOLOCK', heading: HeadingLevel.HEADING_1, spacing: { after: 200 } }),
       new Paragraph({
-        text: "TERENSKI IZVJEŠTAJ - GEOLOCK",
-        heading: HeadingLevel.HEADING_1,
-        spacing: { after: 200 }
-      }),
-      new Paragraph({
-        children: [
-          new TextRun({ text: "Naziv lokacije: ", bold: true }),
-          new TextRun(loc.title || "Bez naziva")
-        ],
+        children: [new TextRun({ text: 'Naziv lokacije: ', bold: true }), new TextRun(loc.title || 'Bez naziva')],
         spacing: { after: 120 }
       }),
       new Paragraph({
-        children: [
-          new TextRun({ text: "Datum i vrijeme: ", bold: true }),
-          new TextRun(loc.timestamp ? new Date(loc.timestamp).toLocaleString("bs") : "Nije zabilježeno")
-        ],
+        children: [new TextRun({ text: 'Zabilježeno: ', bold: true }), new TextRun(fmt(loc.createdAt))],
+        spacing: { after: 120 }
+      }),
+      new Paragraph({
+        children: [new TextRun({ text: 'Zadnja izmjena: ', bold: true }), new TextRun(fmt(loc.updatedAt))],
         spacing: { after: 200 }
       }),
-      
       new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
         rows: [
           new TableRow({
-            children: [
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Geografska Širina (Lat)", bold: true })] })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Geografska Dužina (Lng)", bold: true })] })] }),
-              new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "MGRS Koordinata", bold: true })] })] })
-            ]
+            children: [cell('Geografska širina (Lat)', true), cell('Geografska dužina (Lng)', true),
+              cell('MGRS', true), cell('Preciznost', true)]
           }),
           new TableRow({
-            children: [
-              new TableCell({ children: [new Paragraph(String(loc.lat))] }),
-              new TableCell({ children: [new Paragraph(String(loc.lng))] }),
-              new TableCell({ children: [new Paragraph(mgrsString)] })
-            ]
+            children: [cell(loc.lat), cell(loc.lng), cell(mgrsOrNA(loc.lat, loc.lng)),
+              cell(loc.accuracy ? `±${Math.round(loc.accuracy)} m` : 'N/A')]
           })
         ]
       }),
-
       new Paragraph({
-        text: "Opis i terenske bilješke:",
-        heading: HeadingLevel.HEADING_2,
-        spacing: { before: 300, after: 100 }
+        text: 'Opis i terenske bilješke:', heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 100 }
       }),
-      new Paragraph({
-        text: loc.description || "Nema pisanog opisa.",
-        spacing: { after: 300 }
-      })
+      new Paragraph({ text: loc.description || 'Nema pisanog opisa.', spacing: { after: 300 } })
     ];
 
-    if (loc.images && loc.images.length > 0) {
-      docChildren.push(
-        new Paragraph({
-          text: "Fotografije sa terena:",
-          heading: HeadingLevel.HEADING_2,
-          spacing: { before: 200, after: 150 }
-        })
-      );
+    if (loc.documents.length > 0 || loc.audio) {
+      children.push(new Paragraph({
+        text: 'Prilozi:', heading: HeadingLevel.HEADING_2, spacing: { before: 200, after: 100 }
+      }));
+      for (const d of loc.documents) children.push(new Paragraph({ text: d.name, bullet: { level: 0 } }));
+      if (loc.audio) children.push(new Paragraph({ text: 'Glasovna bilješka (dostupna u aplikaciji)', bullet: { level: 0 } }));
+    }
 
-      for (const imgBase64 of loc.images) {
+    if (loc.images.length > 0) {
+      children.push(new Paragraph({
+        text: 'Fotografije sa terena:', heading: HeadingLevel.HEADING_2, spacing: { before: 200, after: 150 }
+      }));
+      for (const mediaId of loc.images) {
         try {
-          const base64Data = imgBase64.split(',')[1];
-          if (!base64Data) continue;
-          
-          const binaryString = atob(base64Data);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-          }
-
-          docChildren.push(
-            new Paragraph({
-              children: [
-                new ImageRun({
-                  data: bytes,
-                  transformation: { width: 450, height: 300 }
-                })
-              ],
-              spacing: { after: 200 }
-            })
-          );
+          const blob = await getMediaBlobEnsured(mediaId);
+          if (!blob) continue;
+          const transformation = await fitImage(blob);
+          children.push(new Paragraph({
+            children: [new ImageRun({ data: new Uint8Array(await blob.arrayBuffer()), transformation })],
+            spacing: { after: 200 }
+          }));
         } catch (imgErr) {
-          console.error("Greška pri dodavanju slike u DOCX:", imgErr);
+          console.error('Slika nije dodana u DOCX:', imgErr);
         }
       }
     }
 
-    const doc = new Document({
-      sections: [{ children: docChildren }]
-    });
-
+    const doc = new Document({ sections: [{ children }] });
     const blob = await Packer.toBlob(doc);
-    downloadFile(blob, `Izvjestaj_${(loc.title || 'lokacija').replace(/\s+/g, '_')}.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-
+    downloadBlob(blob, `Izvjestaj_${safeFileName(loc.title, 'lokacija')}.docx`);
   } catch (err) {
-    console.error("Greška pri generisanju DOCX fajla:", err);
+    console.error('Greška pri generisanju DOCX fajla:', err);
+    showToast('Generisanje DOCX izvještaja nije uspjelo.', 'error');
   }
 }

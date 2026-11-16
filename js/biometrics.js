@@ -1,133 +1,138 @@
-import { getSecretKey, setSecretKey } from './crypto.js';
+// Biometrijsko otključavanje preko WebAuthn PRF ekstenzije.
+//
+// Autentifikator (otisak / FaceID / Windows Hello) za isti credential i isti "salt" uvijek vraća
+// isti tajni PRF izlaz — ali samo nakon uspješne biometrijske provjere. Iz tog izlaza izvodimo
+// KEK koji omotava DEK. U localStorage ostaje samo omotani DEK, pa bez biometrije (ili lozinke)
+// ključ nije dostupan, za razliku od stare verzije koja ga je držala u plain tekstu.
+//
+// Ako uređaj/preglednik ne podržava PRF, biometrija se ne nudi (lozinka uvijek radi).
 
-// Pomoćne funkcije za konverziju ArrayBuffer <-> Base64
-function arrayBufferToBase64(buffer) {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
-}
+import {
+  deriveKeyFromPrf, wrapDataKey, unwrapDataKey, getActiveKey, setActiveKey, randomBytes
+} from './crypto.js';
+import { bytesToBase64, base64ToBytes } from './utils.js';
 
-function base64ToArrayBuffer(base64) {
-  const binaryString = atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+const BIO_STORAGE = 'geolock_bio_v1';
+
+function loadRecord() {
+  try {
+    const rec = JSON.parse(localStorage.getItem(BIO_STORAGE));
+    return rec && rec.credId && rec.wrapped ? rec : null;
+  } catch {
+    return null;
   }
-  return bytes.buffer;
 }
 
 export async function isBiometricsAvailable() {
-  if (window.PublicKeyCredential && 
-      PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) {
-    try {
-      return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-    } catch (e) {
-      return false;
-    }
-  }
-  return false;
-}
-
-// Registracija biometrije na uređaju
-export async function registerBiometrics() {
-  const isAvailable = await isBiometricsAvailable();
-  if (!isAvailable) {
-    alert("Vaš uređaj ne podržava biometrijsku autentifikaciju.");
-    return false;
-  }
-
-  const currentKey = getSecretKey();
-  if (!currentKey) {
-    alert("Prvo se prijavite pomoću emaila i lozinke kako bi se generisao enkripcijski ključ.");
-    return false;
-  }
-
   try {
-    const challenge = new Uint8Array(32);
-    window.crypto.getRandomValues(challenge);
-
-    const userId = new Uint8Array(16);
-    window.crypto.getRandomValues(userId);
-
-    const publicKeyCredentialCreationOptions = {
-      challenge: challenge,
-      rp: { name: "GeoLock", id: window.location.hostname },
-      user: {
-        id: userId,
-        name: "geolock_user",
-        displayName: "GeoLock User"
-      },
-      pubKeyCredParams: [
-        { alg: -7, type: "public-key" },  // ES256
-        { alg: -257, type: "public-key" } // RS256
-      ],
-      authenticatorSelection: {
-        authenticatorAttachment: "platform", // Isključivo ugrađeni čitač (otisak/Windows Hello)
-        userVerification: "required",
-        residentKey: "preferred"
-      },
-      timeout: 60000
-    };
-
-    const credential = await navigator.credentials.create({
-      publicKey: publicKeyCredentialCreationOptions
-    });
-
-    if (credential) {
-      // 🔑 KLJUČNO: Sačuvamo Credential ID u Base64 formatu
-      const credIdBase64 = arrayBufferToBase64(credential.rawId);
-      localStorage.setItem('bio_cred_id', credIdBase64);
-      localStorage.setItem('bio_vault_key', currentKey);
-      localStorage.setItem('biometrics_enabled', 'true');
-      
-      alert("Otisak prsta / FaceID / Windows Hello uspješno povezan! 🔐");
-      return true;
-    }
-  } catch (err) {
-    console.error("Greška pri biometrijskoj registraciji:", err);
+    return !!(window.PublicKeyCredential
+      && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable
+      && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
+  } catch {
     return false;
   }
 }
 
-// Autentifikacija biometrijom pri ulasku
-export async function authenticateWithBiometrics() {
-  const isEnabled = localStorage.getItem('biometrics_enabled') === 'true';
-  const storedKey = localStorage.getItem('bio_vault_key');
-  const credIdBase64 = localStorage.getItem('bio_cred_id');
+export function isBiometricsEnabled(userId) {
+  const rec = loadRecord();
+  return !!rec && (!userId || rec.userId === userId);
+}
 
-  if (!isEnabled || !storedKey || !credIdBase64) {
-    alert("Biometrija nije aktivirana na ovom uređaju. Prijavite se emailom i lozinkom.");
-    return false;
-  }
+export function removeBiometrics() {
+  localStorage.removeItem(BIO_STORAGE);
+}
 
-  try {
-    const challenge = new Uint8Array(32);
-    window.crypto.getRandomValues(challenge);
+function prfFromResult(credential) {
+  const ext = credential.getClientExtensionResults?.() ?? {};
+  const first = ext.prf?.results?.first;
+  return first ? new Uint8Array(first) : null;
+}
 
-    const rawId = base64ToArrayBuffer(credIdBase64);
-
-    const publicKeyCredentialRequestOptions = {
-      challenge: challenge,
+async function assertWithPrf(credId, prfSalt) {
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge: randomBytes(32),
       rpId: window.location.hostname,
-      // 🔑 KLJUČNO: Ciljamo tačan registrovani biometrijski ključ (sprečava Google Password Manager)
-      allowCredentials: [{
-        id: rawId,
-        type: 'public-key',
-        transports: ['internal']
-      }],
-      userVerification: "required",
-      timeout: 60000
-    };
-
-    const assertion = await navigator.credentials.get({
-      publicKey: publicKeyCredentialRequestOptions
-    });
-
-    if (assertion) {
-      setSecretKey(storedKey);
-      console.log("Biometrijska verifikacija uspješna! Enkripcijski ključ otključan. 🔓");
-      return true;
+      allowCredentials: [{ id: credId, type: 'public-key', transports: ['internal'] }],
+      userVerification: 'required',
+      timeout: 60000,
+      extensions: { prf: { eval: { first: prfSalt } } }
     }
+  });
+  return assertion ? prfFromResult(assertion) : null;
+}
+
+/**
+ * Registruje biometriju za trenutno otključanu sesiju.
+ * Vraća { ok: true } ili { ok: false, reason }.
+ */
+export async function registerBiometrics(userId, userLabel = 'GeoLock korisnik') {
+  const dek = getActiveKey();
+  if (!dek) return { ok: false, reason: 'Prvo se prijavite lozinkom.' };
+  if (!(await isBiometricsAvailable())) {
+    return { ok: false, reason: 'Vaš uređaj ne podržava biometrijsku autentifikaciju.' };
+  }
+
+  try {
+    const credential = await navigator.credentials.create({
+      publicKey: {
+        challenge: randomBytes(32),
+        rp: { name: 'GeoLock', id: window.location.hostname },
+        user: {
+          id: new TextEncoder().encode(String(userId || 'geolock')).slice(0, 64),
+          name: userLabel,
+          displayName: userLabel
+        },
+        pubKeyCredParams: [{ alg: -7, type: 'public-key' }, { alg: -257, type: 'public-key' }],
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform',
+          userVerification: 'required',
+          residentKey: 'discouraged'
+        },
+        timeout: 60000,
+        extensions: { prf: {} }
+      }
+    });
+    if (!credential) return { ok: false, reason: 'Registracija je otkazana.' };
+
+    // Neki preglednici ne vraćaju PRF rezultat pri kreiranju, pa ga tražimo drugim pozivom.
+    const credId = new Uint8Array(credential.rawId);
+    const prfSalt = randomBytes(32);
+    const prf = await assertWithPrf(credId, prfSalt);
+    if (!prf) {
+      return {
+        ok: false,
+        reason: 'Ovaj uređaj/preglednik ne podržava siguran biometrijski ključ (WebAuthn PRF). '
+          + 'Koristite lozinku.'
+      };
+    }
+
+    const kek = await deriveKeyFromPrf(prf);
+    localStorage.setItem(BIO_STORAGE, JSON.stringify({
+      userId,
+      credId: bytesToBase64(credId),
+      prfSalt: bytesToBase64(prfSalt),
+      wrapped: await wrapDataKey(dek, kek)
+    }));
+    return { ok: true };
   } catch (err) {
-    console.warn("Biometrijska verifikacija otkazana ili neuspješna:", err);
+    console.warn('Biometrijska registracija nije uspjela:', err);
+    return { ok: false, reason: 'Biometrijska registracija je otkazana ili nije uspjela.' };
+  }
+}
+
+/** Otključava DEK biometrijom. Vraća true/false. */
+export async function unlockWithBiometrics() {
+  const rec = loadRecord();
+  if (!rec) return false;
+  try {
+    const prf = await assertWithPrf(base64ToBytes(rec.credId), base64ToBytes(rec.prfSalt));
+    if (!prf) return false;
+    const dek = await unwrapDataKey(rec.wrapped, await deriveKeyFromPrf(prf));
+    setActiveKey(dek);
+    return true;
+  } catch (err) {
+    console.warn('Biometrijsko otključavanje nije uspjelo:', err);
     return false;
   }
 }

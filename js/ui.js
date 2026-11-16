@@ -1,470 +1,463 @@
-import { getLocations, deleteLocationFromDb, updateLocation } from './db.js';
+// Prikaz: tabovi, lista, detalji, dijalozi, modali (fokus, Esc, tab-trap), lightbox.
+// Nijedan korisnički podatak se ne ubacuje kroz innerHTML — samo textContent / atributi.
+
+import { getLocation, getLocations, deleteLocation, countLocations } from './db.js';
 import { centerMap, invalidateMapSize, updateMapMarkers } from './map.js';
 import { exportSingleLocationToDocx } from './export.js';
 import { syncLocationsWithCloud } from './sync.js';
-import * as mgrs from 'mgrs';
+import { getMediaUrl, getMediaBlobEnsured, downloadBlob } from './media.js';
+import { showToast } from './toast.js';
+import { hasActiveKey } from './crypto.js';
+import { toMgrs } from './coords.js';
+import { safeFileName } from './utils.js';
 
-let currentEditingImages = [];
-let currentEditingDocs = [];
+const $ = (id) => document.getElementById(id);
 
-// Pomoćne funkcije za multimediju
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve({ name: file.name, data: reader.result, size: file.size });
-    reader.onerror = error => reject(error);
+// ---------- Mali DOM helper ----------
+
+function el(tag, { className, text, attrs, on } = {}, ...children) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  if (attrs) for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (on) for (const [evt, fn] of Object.entries(on)) node.addEventListener(evt, fn);
+  node.append(...children);
+  return node;
+}
+
+// ---------- Modali: otvaranje, zatvaranje, fokus ----------
+
+const modalStack = [];
+const lastFocus = new WeakMap();
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export function openModalElement(id) {
+  const modal = $(id);
+  if (!modal) return;
+  lastFocus.set(modal, document.activeElement);
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  if (!modalStack.includes(id)) modalStack.push(id);
+  setTimeout(() => {
+    const first = modal.querySelector('[autofocus]') || modal.querySelector(FOCUSABLE);
+    first?.focus();
+  }, 0);
+}
+
+export function closeModal(id) {
+  const modal = $(id);
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  const idx = modalStack.indexOf(id);
+  if (idx >= 0) modalStack.splice(idx, 1);
+  if (id === 'detailsModal') $('modalAudioPlayer')?.pause();
+  if (id === 'lightboxModal') $('lightboxImg')?.removeAttribute('src');
+  const prev = lastFocus.get(modal);
+  if (prev && document.contains(prev) && modalStack.length === 0) prev.focus?.();
+}
+
+export function isModalOpen(id) {
+  return $(id)?.classList.contains('open') ?? false;
+}
+
+/** Jednokratna inicijalizacija: dugmad za zatvaranje, klik na pozadinu, Esc, hvatanje Tab-a. */
+export function initModals() {
+  document.addEventListener('click', (e) => {
+    const closeBtn = e.target.closest('[data-close-modal]');
+    if (closeBtn) {
+      closeModal(closeBtn.dataset.closeModal);
+      return;
+    }
+    const backdrop = e.target.classList?.contains('modal-backdrop') ? e.target : null;
+    if (backdrop && backdrop.dataset.persistent === undefined) {
+      if (backdrop.id === 'dialogModal') {
+        if (!$('dialogCancel').hidden) $('dialogCancel').click();
+      } else {
+        closeModal(backdrop.id);
+      }
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    const topId = modalStack[modalStack.length - 1];
+    if (!topId) return;
+    const modal = $(topId);
+
+    if (e.key === 'Escape') {
+      if (topId === 'dialogModal') {
+        if (!$('dialogCancel').hidden) $('dialogCancel').click();
+      } else if (modal.dataset.persistent === undefined) {
+        closeModal(topId);
+      }
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      const focusable = [...modal.querySelectorAll(FOCUSABLE)].filter((n) => n.offsetParent !== null);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
   });
 }
 
-function compressImage(file, maxWidth = 1600, quality = 0.7) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target.result;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width, height = img.height;
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
-        }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
+// ---------- Dijalog (zamjena za alert / confirm / prompt) ----------
+
+let dialogQueue = Promise.resolve();
+
+/**
+ * @returns Promise<{ok:boolean, value:string}>
+ * Opcije: title, message, input{label,type,value,placeholder,autocomplete}, readonlyText (+ copy),
+ *         requireCheck (tekst potvrde), okText, cancelText, showCancel, danger
+ */
+export function showDialog(opts) {
+  const run = () => new Promise((resolve) => {
+    const {
+      title = '', message = '', input = null, readonlyText = null, requireCheck = null,
+      okText = 'U redu', cancelText = 'Odustani', showCancel = true, danger = false
+    } = opts;
+
+    $('dialogTitle').textContent = title;
+    $('dialogMessage').textContent = message;
+    $('dialogMessage').hidden = !message;
+
+    const inputWrap = $('dialogInputWrap');
+    const inputEl = $('dialogInput');
+    inputWrap.hidden = !input;
+    inputEl.value = '';
+    if (input) {
+      $('dialogInputLabel').textContent = input.label || '';
+      inputEl.type = input.type || 'text';
+      inputEl.value = input.value || '';
+      inputEl.placeholder = input.placeholder || '';
+      inputEl.autocomplete = input.autocomplete || 'off';
+      inputEl.required = input.required !== false;
+    } else {
+      inputEl.required = false;
+    }
+
+    const readonlyWrap = $('dialogReadonlyWrap');
+    readonlyWrap.hidden = !readonlyText;
+    $('dialogReadonly').value = readonlyText || '';
+
+    const checkWrap = $('dialogCheckWrap');
+    const checkEl = $('dialogCheck');
+    checkWrap.hidden = !requireCheck;
+    checkEl.checked = false;
+    $('dialogCheckLabel').textContent = requireCheck || '';
+
+    const okBtn = $('dialogOk');
+    const cancelBtn = $('dialogCancel');
+    okBtn.textContent = okText;
+    okBtn.className = `btn ${danger ? 'btn-danger' : ''}`.trim();
+    okBtn.disabled = !!requireCheck;
+    cancelBtn.textContent = cancelText;
+    cancelBtn.hidden = !showCancel;
+
+    const form = $('dialogForm');
+    const copyBtn = $('dialogCopyBtn');
+
+    const cleanup = () => {
+      form.onsubmit = null;
+      cancelBtn.onclick = null;
+      copyBtn.onclick = null;
+      checkEl.onchange = null;
     };
+    const finish = (ok) => {
+      const value = inputEl.value;
+      cleanup();
+      inputEl.value = '';
+      $('dialogReadonly').value = '';
+      closeModal('dialogModal');
+      resolve({ ok, value });
+    };
+
+    form.onsubmit = (e) => { e.preventDefault(); if (!okBtn.disabled) finish(true); };
+    cancelBtn.onclick = () => finish(false);
+    checkEl.onchange = () => { okBtn.disabled = !checkEl.checked; };
+    copyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText($('dialogReadonly').value);
+        showToast('Kopirano.', 'success', 1500);
+      } catch {
+        $('dialogReadonly').select();
+      }
+    };
+
+    openModalElement('dialogModal');
+    if (input) setTimeout(() => inputEl.focus(), 30);
   });
+
+  dialogQueue = dialogQueue.then(run, run);
+  return dialogQueue;
 }
+
+// ---------- Tabovi ----------
+
+export function switchTab(tabId) {
+  document.querySelectorAll('.tab-content').forEach((n) => n.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach((n) => {
+    n.classList.remove('active');
+    n.setAttribute('aria-selected', 'false');
+  });
+
+  $(tabId)?.classList.add('active');
+  const btn = tabId === 'map-view' ? $('tabMapBtn') : $('tabListBtn');
+  btn?.classList.add('active');
+  btn?.setAttribute('aria-selected', 'true');
+
+  if (tabId === 'map-view') invalidateMapSize();
+  else renderListView();
+}
+
+export async function updateCounts() {
+  const counter = $('tab-count');
+  if (counter) counter.textContent = hasActiveKey() ? String(await countLocations()) : '0';
+}
+
+// ---------- Lista ----------
+
+let renderToken = 0;
+let thumbObserver = null;
+
+function getThumbObserver() {
+  if (!thumbObserver) {
+    thumbObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        thumbObserver.unobserve(entry.target);
+        const img = entry.target;
+        getMediaUrl(img.dataset.mediaId)
+          .then((url) => { if (url) img.src = url; })
+          .catch(() => { img.alt = 'Slika nije dostupna (offline?)'; });
+      }
+    }, { rootMargin: '200px' });
+  }
+  return thumbObserver;
+}
+
+function formatCoords(loc) {
+  return Number.isFinite(loc.lat) && Number.isFinite(loc.lng) ? `${loc.lat}, ${loc.lng}` : '—';
+}
+
+export async function renderListView() {
+  const grid = $('gridContainer');
+  if (!grid) return;
+
+  const token = ++renderToken;
+  const search = ($('searchInput')?.value || '').toLowerCase();
+  const sortBy = $('sortSelect')?.value || 'newest';
+
+  const locations = await getLocations();
+  if (token !== renderToken) return; // pristigao je noviji poziv
+
+  const filtered = locations.filter((l) =>
+    (l.title || '').toLowerCase().includes(search) || (l.description || '').toLowerCase().includes(search));
+
+  filtered.sort((a, b) => {
+    if (sortBy === 'title_asc') return (a.title || '').localeCompare(b.title || '', 'bs');
+    const diff = new Date(a.createdAt) - new Date(b.createdAt);
+    return sortBy === 'oldest' ? diff : -diff;
+  });
+
+  const cards = filtered.map((loc) => {
+    const mgrsText = toMgrs(loc.lat, loc.lng);
+    const card = el('div', { className: 'card', on: { click: () => openDetails(loc.id) } });
+
+    if (loc.images.length > 0) {
+      const thumb = el('img', { className: 'card-thumb', attrs: { alt: 'Fotografija lokacije', loading: 'lazy' } });
+      thumb.dataset.mediaId = loc.images[0];
+      getThumbObserver().observe(thumb);
+      card.append(thumb);
+    }
+
+    const body = el('div', { className: 'card-body' },
+      el('div', { className: 'card-row' },
+        el('div', { className: 'card-title', text: loc.title || 'Bez naslova' }),
+        el('span', {
+          text: loc.synced ? '☁️' : '💾',
+          attrs: { title: loc.synced ? 'Sinhronizovano' : 'Samo lokalno', role: 'img', 'aria-label': loc.synced ? 'Sinhronizovano' : 'Samo lokalno' }
+        })),
+      el('div', { className: 'card-coords', text: formatCoords(loc) }));
+    if (mgrsText) body.append(el('div', { className: 'card-coords card-mgrs', text: `MGRS: ${mgrsText}` }));
+    body.append(el('div', { className: 'card-desc', text: loc.description || 'Nema pisanog opisa.' }));
+
+    const counts = `📷 ${loc.images.length}${loc.documents.length ? ` | 📄 ${loc.documents.length}` : ''}${loc.audio ? ' | 🎙️ Audio' : ''}`;
+    const footer = el('div', { className: 'card-footer' },
+      el('span', { className: 'card-counts', text: counts }),
+      el('button', {
+        className: 'btn btn-secondary btn-small',
+        text: 'Detalji →',
+        attrs: { type: 'button', 'aria-label': `Detalji: ${loc.title || 'Bez naslova'}` }
+      }));
+
+    card.append(body, footer);
+    return card;
+  });
+
+  if (cards.length === 0) {
+    grid.replaceChildren(el('p', { className: 'empty-state', text: locations.length ? 'Nema rezultata pretrage.' : 'Još nema sačuvanih lokacija.' }));
+  } else {
+    grid.replaceChildren(...cards);
+  }
+  await updateCounts();
+}
+
+/** Prazan prikaz dok je aplikacija zaključana. */
+export function clearListView() {
+  renderToken++;
+  $('gridContainer')?.replaceChildren();
+  const counter = $('tab-count');
+  if (counter) counter.textContent = '0';
+}
+
+// ---------- Detalji ----------
+
+export async function openDetails(id) {
+  const loc = await getLocation(id);
+  if (!loc) return;
+
+  $('modalTitle').textContent = loc.title || 'Detalji lokacije';
+
+  const mgrsText = toMgrs(loc.lat, loc.lng);
+  const parts = [`Koordinate: ${formatCoords(loc)}`];
+  if (mgrsText) parts.push(`MGRS: ${mgrsText}`);
+  if (loc.accuracy) parts.push(`±${Math.round(loc.accuracy)} m`);
+  $('modalCoords').textContent = parts.join(' | ');
+
+  const fmt = (iso) => (iso ? new Date(iso).toLocaleString('bs') : '—');
+  $('modalDates').textContent = `Zabilježeno: ${fmt(loc.createdAt)}${loc.updatedAt !== loc.createdAt ? ` · Izmijenjeno: ${fmt(loc.updatedAt)}` : ''}`;
+  $('modalDesc').textContent = loc.description || 'Nema pisanog opisa.';
+
+  // Audio
+  const audioContainer = $('modalAudioContainer');
+  const audioPlayer = $('modalAudioPlayer');
+  audioPlayer.removeAttribute('src');
+  audioContainer.hidden = true;
+  if (loc.audio) {
+    audioContainer.hidden = false;
+    getMediaUrl(loc.audio)
+      .then((url) => { if (url) audioPlayer.src = url; })
+      .catch(() => showToast('Audio nije dostupan (potrebna je konekcija za preuzimanje).', 'error'));
+  }
+
+  // Dokumenti
+  const docsContainer = $('modalDocsContainer');
+  docsContainer.replaceChildren();
+  if (loc.documents.length > 0) {
+    docsContainer.append(el('h4', { className: 'section-title', text: '📄 Priloženi dokumenti:' }));
+    for (const doc of loc.documents) {
+      docsContainer.append(el('div', { className: 'doc-card' },
+        el('div', { className: 'doc-icon', text: getDocIcon(doc.name), attrs: { 'aria-hidden': 'true' } }),
+        el('div', { className: 'doc-info' }, el('span', { className: 'doc-name', text: doc.name, attrs: { title: doc.name } })),
+        el('button', {
+          className: 'doc-download-btn',
+          text: 'Preuzmi',
+          attrs: { type: 'button' },
+          on: {
+            click: async () => {
+              try {
+                const blob = await getMediaBlobEnsured(doc.id);
+                if (!blob) throw new Error('Dokument nije dostupan.');
+                downloadBlob(blob, safeFileName(doc.name, 'dokument'));
+              } catch (err) {
+                showToast(err.message || 'Preuzimanje nije uspjelo.', 'error');
+              }
+            }
+          }
+        })));
+    }
+  }
+
+  // Galerija
+  const gallery = $('modalGallery');
+  gallery.replaceChildren();
+  $('modalImageCount').textContent = String(loc.images.length);
+  if (loc.images.length === 0) {
+    gallery.append(el('p', { className: 'muted', text: 'Nema slika.' }));
+  } else {
+    for (const mediaId of loc.images) {
+      const img = el('img', { attrs: { alt: 'Fotografija s terena', tabindex: '0', role: 'button' } });
+      getMediaUrl(mediaId)
+        .then((url) => {
+          if (!url) return;
+          img.src = url;
+          const open = () => openLightbox(url);
+          img.addEventListener('click', open);
+          img.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+        })
+        .catch(() => { img.alt = 'Slika nije dostupna (offline?)'; });
+      gallery.append(el('div', { className: 'gallery-item' }, img));
+    }
+  }
+
+  // Akcije
+  $('modalDocxBtn').onclick = () => exportSingleLocationToDocx(loc.id);
+  $('modalEditBtn').onclick = () => {
+    closeModal('detailsModal');
+    editHandler(loc.id);
+  };
+  $('modalMapBtn').onclick = () => {
+    closeModal('detailsModal');
+    switchTab('map-view');
+    centerMap(loc.lat, loc.lng);
+  };
+  $('modalDeleteBtn').onclick = () => confirmAndDelete(loc);
+
+  openModalElement('detailsModal');
+}
+
+async function confirmAndDelete(loc) {
+  const { ok } = await showDialog({
+    title: 'Brisanje lokacije',
+    message: `Trajno obrisati "${loc.title}" zajedno sa svim prilozima? Ova radnja se ne može poništiti.`,
+    okText: 'Obriši',
+    danger: true
+  });
+  if (!ok) return;
+
+  try {
+    await deleteLocation(loc.id);
+  } catch (err) {
+    console.error(err);
+    showToast('Brisanje nije uspjelo.', 'error');
+    return;
+  }
+  closeModal('detailsModal');
+  await updateMapMarkers();
+  await renderListView();
+  showToast('Lokacija obrisana.', 'success');
+  syncLocationsWithCloud({ silent: true }).catch(() => {});
+}
+
+// Edit modal živi u edit.js; registruje se ovdje da ui.js ne zavisi od njega (bez cikličnih importa).
+let editHandler = () => {};
+export function registerEditHandler(fn) { editHandler = fn; }
 
 function getDocIcon(filename) {
-  if (!filename) return '📎';
-  const ext = filename.split('.').pop().toLowerCase();
+  const ext = (filename || '').split('.').pop().toLowerCase();
   if (ext === 'pdf') return '📄';
   if (['doc', 'docx'].includes(ext)) return '📝';
   if (['xls', 'xlsx', 'csv'].includes(ext)) return '📊';
   return '📎';
 }
 
-function safeGetMgrs(latRaw, lngRaw) {
-  try {
-    const lat = Number(latRaw);
-    const lng = Number(lngRaw);
-    if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && (lat !== 0 || lng !== 0)) {
-      return mgrs.forward([lng, lat], 5);
-    }
-  } catch (e) {
-    console.warn('MGRS konverzija greška:', latRaw, lngRaw);
-  }
-  return null;
+// ---------- Lightbox (umjesto window.open + document.write) ----------
+
+export function openLightbox(url) {
+  $('lightboxImg').src = url;
+  openModalElement('lightboxModal');
 }
 
-export function switchTab(tabId) {
-  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-
-  const targetTab = document.getElementById(tabId);
-  if (targetTab) targetTab.classList.add('active');
-
-  if (tabId === 'map-view') {
-    const mapBtn = document.getElementById('tabMapBtn');
-    if (mapBtn) mapBtn.classList.add('active');
-    invalidateMapSize();
-  } else {
-    const listBtn = document.getElementById('tabListBtn');
-    if (listBtn) listBtn.classList.add('active');
-    renderListView();
-  }
+/** Osvježi mapu i listu (poziva se nakon svake promjene podataka). */
+export async function refreshViews() {
+  await Promise.all([updateMapMarkers(), renderListView()]);
 }
-
-export async function updateCounts() {
-  const el = document.getElementById('tab-count');
-  if (el) {
-    const locations = await getLocations();
-    el.innerText = locations.length;
-  }
-}
-
-export async function renderListView() {
-  const grid = document.getElementById('gridContainer');
-  if (!grid) return;
-
-  grid.innerHTML = '';
-  const searchInput = document.getElementById('searchInput');
-  const sortSelect = document.getElementById('sortSelect');
-
-  const search = searchInput ? searchInput.value.toLowerCase() : '';
-  const sortBy = sortSelect ? sortSelect.value : 'newest';
-
-  const locations = await getLocations();
-
-  let filtered = locations.filter(l => 
-    (l.title || '').toLowerCase().includes(search) || 
-    (l.description || '').toLowerCase().includes(search)
-  );
-
-  filtered.sort((a, b) => {
-    if (sortBy === 'title_asc') return (a.title || '').localeCompare(b.title || '');
-    if (sortBy === 'oldest') return new Date(a.timestamp) - new Date(b.timestamp);
-    return new Date(b.timestamp) - new Date(a.timestamp);
-  });
-
-  filtered.forEach(loc => {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.addEventListener('click', () => openModal(loc.id));
-
-    const hasImg = loc.images && loc.images.length > 0;
-    const hasDocs = loc.documents && loc.documents.length > 0;
-    const isSynced = loc.synced;
-    const mgrsText = safeGetMgrs(loc.lat, loc.lng);
-
-    card.innerHTML = `
-      ${hasImg ? `<img src="${loc.images[0]}" class="card-thumb" alt="Slika">` : ''}
-      <div class="card-body">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div class="card-title"></div>
-          <span title="${isSynced ? 'Sinhronizovano' : 'Lokalno'}" style="font-size:12px;">
-            ${isSynced ? '☁️' : '💾'}
-          </span>
-        </div>
-        <div class="card-coords">${loc.lat}, ${loc.lng}</div>
-        ${mgrsText ? `<div class="card-coords" style="color: #0284c7; font-weight: 600; margin-top: -4px; margin-bottom: 8px;">MGRS: ${mgrsText}</div>` : ''}
-        <div class="card-desc"></div>
-      </div>
-      <div class="card-footer">
-        <span style="font-size:11px; color:#64748b;">
-          📷 ${hasImg ? loc.images.length : 0} 
-          ${hasDocs ? ` | 📄 ${loc.documents.length}` : ''} 
-          ${loc.audio ? ' | 🎙️ Audio' : ''}
-        </span>
-        <button type="button" class="btn btn-secondary" style="font-size:10px; padding:3px 6px;">Detalji &rarr;</button>
-      </div>
-    `;
-
-    card.querySelector('.card-title').textContent = loc.title || 'Bez naslova';
-    card.querySelector('.card-desc').textContent = loc.description || 'Nema pisanog opisa.';
-
-    grid.appendChild(card);
-  });
-
-  await updateCounts();
-}
-
-export async function openModal(id) {
-  const locations = await getLocations();
-  const loc = locations.find(l => String(l.id) === String(id));
-  if (!loc) return;
-
-  const titleEl = document.getElementById('modalTitle');
-  if (titleEl) titleEl.textContent = loc.title || 'Detalji lokacije';
-
-  const mgrsText = safeGetMgrs(loc.lat, loc.lng);
-  const modalMgrsText = mgrsText ? ` | MGRS: ${mgrsText}` : '';
-
-  const coordsEl = document.getElementById('modalCoords');
-  if (coordsEl) coordsEl.textContent = `Koordinate: ${loc.lat}, ${loc.lng}${modalMgrsText}`;
-
-  const descEl = document.getElementById('modalDesc');
-  if (descEl) descEl.textContent = loc.description || 'Nema pisanog opisa.';
-
-  const audioContainer = document.getElementById('modalAudioContainer');
-  const audioPlayer = document.getElementById('modalAudioPlayer');
-  if (audioContainer && audioPlayer) {
-    if (loc.audio) {
-      audioPlayer.src = loc.audio;
-      audioContainer.style.display = 'block';
-    } else {
-      audioPlayer.src = '';
-      audioContainer.style.display = 'none';
-    }
-  }
-
-  const docsContainer = document.getElementById('modalDocsContainer');
-  if (docsContainer) {
-    docsContainer.innerHTML = '';
-    if (loc.documents && loc.documents.length > 0) {
-      const header = document.createElement('h4');
-      header.style.cssText = 'margin:12px 0 8px 0; font-size:13px; color:#475569; font-weight:600;';
-      header.textContent = '📄 Priloženi dokumenti:';
-      docsContainer.appendChild(header);
-
-      loc.documents.forEach(doc => {
-        const docCard = document.createElement('div');
-        docCard.className = 'doc-card';
-
-        const iconDiv = document.createElement('div');
-        iconDiv.className = 'doc-icon';
-        iconDiv.textContent = getDocIcon(doc.name);
-
-        const infoDiv = document.createElement('div');
-        infoDiv.className = 'doc-info';
-
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'doc-name';
-        nameSpan.title = doc.name;
-        nameSpan.textContent = doc.name;
-
-        infoDiv.appendChild(nameSpan);
-
-        const downloadLink = document.createElement('a');
-        downloadLink.href = doc.data;
-        downloadLink.download = doc.name;
-        downloadLink.className = 'doc-download-btn';
-        downloadLink.innerHTML = `<span>Preuzmi</span>`;
-
-        docCard.appendChild(iconDiv);
-        docCard.appendChild(infoDiv);
-        docCard.appendChild(downloadLink);
-        docsContainer.appendChild(docCard);
-      });
-    }
-  }
-
-  const gallery = document.getElementById('modalGallery');
-  const countEl = document.getElementById('modalImageCount');
-  if (gallery) {
-    gallery.innerHTML = '';
-    if (loc.images && loc.images.length > 0) {
-      if (countEl) countEl.innerText = loc.images.length;
-      loc.images.forEach(img => {
-        const item = document.createElement('div');
-        item.className = 'gallery-item';
-        const imgEl = document.createElement('img');
-        imgEl.src = img;
-        imgEl.addEventListener('click', () => openImageFull(img));
-        item.appendChild(imgEl);
-        gallery.appendChild(item);
-      });
-    } else {
-      if (countEl) countEl.innerText = '0';
-      gallery.innerHTML = '<p style="color:#94a3b8; font-size:12px;">Nema slika.</p>';
-    }
-  }
-
-  const docxBtn = document.getElementById('modalDocxBtn');
-  if (docxBtn) docxBtn.onclick = () => exportSingleLocationToDocx(loc.id);
-
-  // DIREKTAN POZIV ZA EDIT MODAL (BEZ WINDOW OBJEKTA)
-  const editBtn = document.getElementById('modalEditBtn');
-  if (editBtn) {
-    editBtn.onclick = () => {
-      closeModal('detailsModal');
-      openEditModal(loc.id);
-    };
-  }
-
-  const mapBtn = document.getElementById('modalMapBtn');
-  if (mapBtn) {
-    mapBtn.onclick = () => {
-      closeModal('detailsModal');
-      switchTab('map-view');
-      centerMap(loc.lat, loc.lng);
-    };
-  }
-
-  const deleteBtn = document.getElementById('modalDeleteBtn');
-  if (deleteBtn) {
-    deleteBtn.onclick = async () => {
-      if (confirm('Obrišite lokaciju?')) {
-        await deleteLocationFromDb(loc.id);
-        await updateMapMarkers();
-        await renderListView();
-        closeModal('detailsModal');
-      }
-    };
-  }
-
-  const detailsModal = document.getElementById('detailsModal');
-  if (detailsModal) detailsModal.classList.add('open');
-}
-
-// LOGIKA ZA EDIT MODAL PREBAČENA U UI.JS
-export async function openEditModal(id) {
-  const locations = await getLocations();
-  const loc = locations.find(l => String(l.id) === String(id));
-  if (!loc) return;
-
-  const editId = document.getElementById('editId');
-  const editLat = document.getElementById('editLat');
-  const editLng = document.getElementById('editLng');
-  const editTitle = document.getElementById('editTitle');
-  const editDesc = document.getElementById('editDescription');
-
-  if (editId) editId.value = loc.id;
-  if (editLat) editLat.value = loc.lat;
-  if (editLng) editLng.value = loc.lng;
-  if (editTitle) editTitle.value = loc.title;
-  if (editDesc) editDesc.value = loc.description || '';
-
-  const editMgrsInput = document.getElementById('editMgrsInput');
-  if (editMgrsInput) {
-    const mgrsVal = safeGetMgrs(loc.lat, loc.lng);
-    editMgrsInput.value = mgrsVal || '';
-  }
-
-  currentEditingImages = loc.images ? [...loc.images] : [];
-  renderEditGallery();
-
-  currentEditingDocs = loc.documents ? [...loc.documents] : [];
-  renderEditDocs();
-
-  openModalElement('editModal');
-}
-
-export function renderEditGallery() {
-  const gallery = document.getElementById('editExistingGallery');
-  if (!gallery) return;
-  gallery.innerHTML = '';
-  currentEditingImages.forEach((img, index) => {
-    const item = document.createElement('div');
-    item.className = 'gallery-item';
-    
-    const imgEl = document.createElement('img');
-    imgEl.src = img;
-    
-    const delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.className = 'delete-img-btn';
-    delBtn.innerHTML = '&times;';
-    delBtn.addEventListener('click', () => {
-      currentEditingImages.splice(index, 1);
-      renderEditGallery();
-    });
-
-    item.appendChild(imgEl);
-    item.appendChild(delBtn);
-    gallery.appendChild(item);
-  });
-}
-
-export function renderEditDocs() {
-  const docsContainer = document.getElementById('editExistingDocs');
-  if (!docsContainer) return;
-  docsContainer.innerHTML = '';
-
-  if (currentEditingDocs.length === 0) {
-    docsContainer.innerHTML = '<span style="font-size:11px; color:#94a3b8;">Nema priloženih dokumenata.</span>';
-    return;
-  }
-
-  currentEditingDocs.forEach((doc, index) => {
-    const item = document.createElement('div');
-    item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px; margin-bottom:4px;';
-    
-    const nameSpan = document.createElement('span');
-    nameSpan.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%;';
-    nameSpan.textContent = `📄 ${doc.name}`;
-
-    const delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.className = 'btn btn-danger';
-    delBtn.style.cssText = 'font-size:10px; padding:2px 6px;';
-    delBtn.innerHTML = '&times;';
-    delBtn.addEventListener('click', () => {
-      currentEditingDocs.splice(index, 1);
-      renderEditDocs();
-    });
-
-    item.appendChild(nameSpan);
-    item.appendChild(delBtn);
-    docsContainer.appendChild(item);
-  });
-}
-
-export async function handleEditFormSubmit(e) {
-  e.preventDefault();
-  const id = document.getElementById('editId').value;
-  const lat = parseFloat(document.getElementById('editLat').value);
-  const lng = parseFloat(document.getElementById('editLng').value);
-  const title = document.getElementById('editTitle').value;
-  const description = document.getElementById('editDescription').value;
-  
-  const files = document.getElementById('editNewImages').files;
-  const newImages = await Promise.all(Array.from(files).map(file => compressImage(file)));
-
-  const newDocInput = document.getElementById('editNewDocs');
-  const newDocFiles = newDocInput ? newDocInput.files : [];
-  const newDocs = await Promise.all(Array.from(newDocFiles).map(file => fileToBase64(file)));
-
-  try {
-    await updateLocation(id, { 
-      lat, 
-      lng, 
-      title, 
-      description, 
-      images: [...currentEditingImages, ...newImages], 
-      documents: [...currentEditingDocs, ...newDocs],
-      synced: false,
-      timestamp: new Date().toISOString()
-    });
-
-    closeModal('editModal');
-    if (newDocInput) newDocInput.value = '';
-    const editNewImages = document.getElementById('editNewImages');
-    if (editNewImages) editNewImages.value = '';
-
-    showToast('Izmjena sačuvana!', 'success');
-
-    if (navigator.onLine) {
-      try { await syncLocationsWithCloud(); } catch (err) {}
-    }
-
-    await updateMapMarkers();
-    await renderListView();
-
-  } catch (err) {
-    console.error("Greška pri izmjeni lokacije:", err);
-    showToast("Greška pri spašavanju izmjena.", "error");
-  }
-}
-
-function openModalElement(id) {
-  const modal = document.getElementById(id);
-  if (modal) modal.classList.add('open');
-}
-
-export function closeModal(id) {
-  const modal = document.getElementById(id);
-  if (modal) modal.classList.remove('open');
-  if (id === 'detailsModal') {
-    const player = document.getElementById('modalAudioPlayer');
-    if (player) player.pause();
-  }
-}
-
-export function openImageFull(src) {
-  const newWin = window.open();
-  if (newWin) {
-    newWin.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head><title>Pregled slike</title></head>
-        <body style="margin:0; background:#000; display:flex; justify-content:center; align-items:center; height:100vh;">
-          <img src="${src}" style="max-width:100%; max-height:100vh; object-fit:contain;">
-        </body>
-      </html>
-    `);
-    newWin.document.close();
-  }
-}
-
-export function showToast(message, type = 'info', duration = 2500) {
-  const toast = document.getElementById('toastNotification');
-  if (!toast) return;
-
-  const icons = { info: 'ℹ️', success: '✅', error: '⚠️' };
-  toast.innerHTML = `<span>${icons[type] || ''}</span> <span>${message}</span>`;
-  toast.className = `toast-notification ${type} show`;
-
-  setTimeout(() => {
-    toast.classList.remove('show');
-  }, duration);
-}
-
-window.openEditModal = openEditModal;
-window.closeModal = closeModal;
